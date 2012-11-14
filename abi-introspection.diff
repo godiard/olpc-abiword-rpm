@@ -1,0 +1,207 @@
+diff --git a/configure.in b/configure.in
+index e750ba1..5f5c06c 100644
+--- a/configure.in
++++ b/configure.in
+@@ -1085,6 +1085,7 @@ INTROSPECTION_GENERATE=
+ INTROSPECTION_GIRDIR=
+ INTROSPECTION_TYPELIBDIR=
+ if test "x$found_introspection" = "xyes"; then
++   AM_PATH_PYTHON
+    INTROSPECTION_SCANNER=`$PKG_CONFIG --variable=g_ir_scanner gobject-introspection-1.0`
+    INTROSPECTION_COMPILER=`$PKG_CONFIG --variable=g_ir_compiler gobject-introspection-1.0`
+    INTROSPECTION_GENERATE=`$PKG_CONFIG --variable=g_ir_generate gobject-introspection-1.0`
+@@ -1167,6 +1168,7 @@ AC_OUTPUT(
+   src/af/xap/gtk/t/Makefile
+   src/af/xap/win/Makefile
+   src/af/xap/xp/Makefile
++  src/gi-overrides/Makefile
+   src/plugins/Makefile
+   src/text/Makefile
+   src/text/fmt/Makefile
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 4c425c4..ca63d8d 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -9,11 +9,16 @@ resources =
+ -include $(INTROSPECTION_MAKEFILE)
+ INTROSPECTION_GIRS =
+ INTROSPECTION_SCANNER_ARGS = \
+-	-v --warn-all --accept-unprefixed
++	-v --warn-all --accept-unprefixed \
++	--symbol-prefix=abi --symbol-prefix=libabiword
+ INTROSPECTION_COMPILER_ARGS = \
+ 	--includedir=$(srcdir) \
+     --includedir=.
+ 
++if HAVE_INTROSPECTION
++SUBDIRS += gi-overrides
++endif
++
+ if TOOLKIT_COCOA
+ main_cpp = $(top_srcdir)/src/wp/main/cocoa/CocoaMain.cpp
+ include $(top_srcdir)/src/wp/main/cocoa/bundle.mk
+@@ -171,7 +176,9 @@ Abi_@ABI_SUB_SERIES@_gir_FILES = \
+ 	af/xap/gtk/xap_UnixTableWidget.h \
+ 	af/xap/gtk/xap_UnixTableWidget.cpp \
+ 	wp/ap/gtk/abiwidget.h \
+-	wp/ap/gtk/abiwidget.cpp
++	wp/ap/gtk/abiwidget.cpp \
++	wp/main/gtk/libabiword.h \
++	wp/main/gtk/libabiword.cpp
+ 
+ girdir = $(GIRDIR)
+ gir_DATA = $(INTROSPECTION_GIRS)
+diff --git a/src/gi-overrides/Abi.py b/src/gi-overrides/Abi.py
+new file mode 100644
+index 0000000..666fd61
+--- /dev/null
++++ b/src/gi-overrides/Abi.py
+@@ -0,0 +1,9 @@
++import sys
++from gi.repository import Gtk
++from ..overrides import override
++from ..importer import modules
++
++Abi = modules['Abi']._introspection_module
++
++# Initialize libabiword
++Abi.init(sys.argv)
+diff --git a/src/gi-overrides/Makefile.am b/src/gi-overrides/Makefile.am
+new file mode 100644
+index 0000000..7fe3913
+--- /dev/null
++++ b/src/gi-overrides/Makefile.am
+@@ -0,0 +1,2 @@
++overridesdir = `python -c "import gi; print gi._overridesdir"`
++overrides_PYTHON = Abi.py
+diff --git a/src/wp/ap/gtk/abiwidget.cpp b/src/wp/ap/gtk/abiwidget.cpp
+index 0ce2946..a32fc47 100644
+--- a/src/wp/ap/gtk/abiwidget.cpp
++++ b/src/wp/ap/gtk/abiwidget.cpp
+@@ -1310,10 +1310,17 @@ s_abi_widget_get_file_type(const char * extension_or_mimetype, const char * cont
+ 	return ieft;
+ }
+ 
+-/*!
+- * Extract all the content in the document.
+- * Caller must g_free the memory.
+- * Number of bytes is returned in iLength
++/**
++ * abi_widget_get_content:
++ * @w: an #AbiWidget
++ * @extension_or_mimetype: content type for the returned selection
++ * @exp_props: (allow-none): export properties
++ * @iLength: (out): length of returned selection, in bytes
++ *
++ * Gets all document contents
++ *
++ * Returns: (transfer full): the selection,
++ *          the caller must free the memory through g_free()
+  */
+ extern "C" gchar *
+ abi_widget_get_content(AbiWidget * w, const char * extension_or_mimetype, const char * exp_props, gint * iLength)
+@@ -1342,10 +1349,16 @@ abi_widget_get_content(AbiWidget * w, const char * extension_or_mimetype, const
+ 	return szOut;
+ }
+ 
+-/*!
+- * Extract all the content in the selection
+- * Caller must g_free the memory.
+- * Number of bytes is returned in iLength
++/**
++ * abi_widget_get_selection:
++ * @w: an #AbiWidget
++ * @extension_or_mimetype: content type for the returned selection
++ * @iLength: (out): length of returned selection, in bytes
++ *
++ * Gets the current selection
++ *
++ * Returns: (transfer full): the selection,
++ *          the caller must free the memory through g_free()
+  */
+ extern "C" gchar *
+ abi_widget_get_selection(AbiWidget * w, const gchar * extension_or_mimetype, gint * iLength)
+@@ -1395,7 +1408,16 @@ abi_widget_get_selection(AbiWidget * w, const gchar * extension_or_mimetype, gin
+ 	return szOut;
+ }
+ 
+-
++/**
++ * abi_widget_get_mouse_pos:
++ * @w: an #AbiWidget
++ * @x: (out): return value for the mouse position in the X axis
++ * @y: (out): return value for the mouse position in the Y axis
++ *
++ * Returns the mouse position relative to @w
++ *
++ * Return value: #TRUE if the mouse position could be retrieved
++ */
+ extern "C" gboolean
+ abi_widget_get_mouse_pos(AbiWidget * w, gint32 * x, gint32 * y)
+ {
+@@ -2476,7 +2498,7 @@ abi_widget_get_type (void)
+ }
+ 
+ /**
+- * abi_widget_new
++ * abi_widget_new:
+  *
+  * Creates a new AbiWord widget using an internal Abiword App
+  */
+@@ -2492,7 +2514,7 @@ abi_widget_new (void)
+ }
+ 
+ /**
+- * abi_widget_new_with_file
++ * abi_widget_new_with_file:
+  *
+  * Creates a new AbiWord widget and tries to load the file
+  * This uses an internal Abiword App
+@@ -2520,7 +2542,7 @@ abi_widget_get_frame ( AbiWidget * w )
+ }
+ 
+ /**
+- * abi_widget_invoke()
++ * abi_widget_invoke:
+  *
+  * Invoke any of abiword's edit methods by name
+  *
+@@ -2545,7 +2567,7 @@ abi_widget_invoke (AbiWidget * w, const char * mthdName)
+ }
+ 
+ /**
+- * abi_widget_invoke_ex()
++ * abi_widget_invoke_ex:
+  *
+  * Invoke any of abiword's edit methods by name
+  *
+diff --git a/src/wp/main/gtk/libabiword.cpp b/src/wp/main/gtk/libabiword.cpp
+index fa673c7..3846732 100644
+--- a/src/wp/main/gtk/libabiword.cpp
++++ b/src/wp/main/gtk/libabiword.cpp
+@@ -28,6 +28,13 @@
+ 
+ static AP_UnixApp *_abiword_app = NULL;
+ 
++/**
++ * libabiword_init:
++ * @argc: (inout): argument count
++ * @argv: (array length=argc) (allow-none): Commandline arguments
++ *
++ * Initializes libabiword
++ */
+ void libabiword_init (int argc, char **argv)
+ {
+ 	if (!_abiword_app) {
+@@ -41,6 +48,11 @@ void libabiword_init (int argc, char **argv)
+ 	}
+ }
+ 
++/**
++ * libabiword_init_noargs:
++ *
++ * Initializes libabiword
++ */
+ void libabiword_init_noargs ()
+ {
+ 	if (!_abiword_app) {

@@ -1,0 +1,1541 @@
+diff --git a/src/af/ev/gtk/ev_UnixKeyboard.cpp b/src/af/ev/gtk/ev_UnixKeyboard.cpp
+index 5c5c109..af51672 100644
+--- a/src/af/ev/gtk/ev_UnixKeyboard.cpp
++++ b/src/af/ev/gtk/ev_UnixKeyboard.cpp
+@@ -79,6 +79,8 @@ bool ev_UnixKeyboard::keyPressEvent(AV_View* pView, GdkEventKey* e)
+ 
+ 	UT_uint32 charData = e->keyval;
+ 
++	pView->setVisualSelectionEnabled(false);
++
+ 	if (e->state & GDK_SHIFT_MASK)
+ 		state |= EV_EMS_SHIFT;
+ 	if (e->state & GDK_CONTROL_MASK)
+diff --git a/src/af/ev/gtk/ev_UnixMouse.cpp b/src/af/ev/gtk/ev_UnixMouse.cpp
+index 17ac999..af3cb2a 100644
+--- a/src/af/ev/gtk/ev_UnixMouse.cpp
++++ b/src/af/ev/gtk/ev_UnixMouse.cpp
+@@ -111,6 +111,9 @@ void EV_UnixMouse::mouseClick(AV_View* pView, GdkEventButton* e)
+ 	EV_EditMouseButton emb = 0;
+ 	EV_EditMouseOp mop = 0;
+ 	EV_EditMouseContext emc = 0;
++	GdkDevice *device;
++
++	device = gdk_event_get_source_device((GdkEvent *) e);
+ 
+ 	if (e->button == 1)
+ 		emb = EV_EMB_BUTTON1;
+@@ -160,6 +163,12 @@ void EV_UnixMouse::mouseClick(AV_View* pView, GdkEventButton* e)
+ 		UT_ASSERT(pEM);
+ 		invokeMouseMethod(pView,pEM,static_cast<UT_sint32>(pView->getGraphics()->tluD(e->x)),static_cast<UT_sint32>(pView->getGraphics()->tluD(e->y)));
+ 		signal(emc|mop|emb|state, static_cast<UT_sint32>(pView->getGraphics()->tluD(e->x)),static_cast<UT_sint32>(pView->getGraphics()->tluD(e->y)));
++
++		if (gdk_device_get_source (device) == GDK_SOURCE_TOUCHSCREEN) {
++			pView->setVisualSelectionEnabled(true);
++		} else {
++			pView->setVisualSelectionEnabled(false);
++		}
+ 		return;
+ 	case EV_EEMR_INCOMPLETE:
+ 		// I'm not sure this makes any sense, but we allow it.
+@@ -182,7 +191,10 @@ void EV_UnixMouse::mouseMotion(AV_View* pView, GdkEventMotion *e)
+ 	EV_EditMouseButton emb = 0;
+ 	EV_EditMouseOp mop;
+ 	EV_EditMouseContext emc = 0;
+-	
++	GdkDevice *device;
++
++	device = gdk_event_get_source_device((GdkEvent *) e);
++
+ 	if (e->state & GDK_SHIFT_MASK)
+ 		ems |= EV_EMS_SHIFT;
+ 	if (e->state & GDK_CONTROL_MASK)
+diff --git a/src/af/xap/gtk/xap_UnixFrameImpl.h b/src/af/xap/gtk/xap_UnixFrameImpl.h
+index 887104e..da4c1ac 100644
+--- a/src/af/xap/gtk/xap_UnixFrameImpl.h
++++ b/src/af/xap/gtk/xap_UnixFrameImpl.h
+@@ -67,6 +67,8 @@ class XAP_UnixFrameImpl : public XAP_FrameImpl
+ 	}
+ 	void resetIMContext ();
+ 
++	virtual GtkWidget * getViewWidget (void) {return NULL;}
++
+ private:
+ 	void _setGeometry ();
+ 
+diff --git a/src/af/xap/xp/xav_View.cpp b/src/af/xap/xp/xav_View.cpp
+index 21bf216..709eaad 100644
+--- a/src/af/xap/xp/xav_View.cpp
++++ b/src/af/xap/xp/xav_View.cpp
+@@ -39,7 +39,8 @@ AV_View::AV_View(XAP_App * pApp, void* pParentData)
+ 	m_iWindowWidth(0),
+ 	m_dOneTDU(0),
+ 	m_bCouldBeActive(true),
+-	m_bConfigureChanged(false)
++	m_bConfigureChanged(false),
++	m_VisualSelectionActive(false)
+ {
+ }
+ 
+diff --git a/src/af/xap/xp/xav_View.h b/src/af/xap/xp/xav_View.h
+index b411864..f7c7f22 100644
+--- a/src/af/xap/xp/xav_View.h
++++ b/src/af/xap/xp/xav_View.h
+@@ -150,6 +150,9 @@ public:
+ 	virtual void	cmdPaste(bool bHonorFormatting = true) = 0;
+ 	virtual void	cmdPasteSelectionAt(UT_sint32 xPos, UT_sint32 yPos) = 0;
+ 
++	virtual void	setVisualSelectionEnabled(bool bActive) { m_VisualSelectionActive=bActive; }
++	bool		getVisualSelectionEnabled(void) { return m_VisualSelectionActive; }
++
+ //
+ // Let subclasses override but this is here to avoid a crash on frame closing.
+ // With a selection in place. (Rather than pure virtual.)
+@@ -177,6 +180,7 @@ protected:
+ 	AV_Focus			m_focus;
+ 	UT_uint32                       m_iTick; // Count changes
+ 	bool				m_bInsertMode;
++	bool				m_VisualSelectionActive;
+ 
+ 	UT_GenericVector<AV_ScrollObj*>	m_scrollListeners;
+ 	UT_GenericVector<AV_Listener*>	m_vecListeners;
+diff --git a/src/text/fmt/gtk/Makefile.am b/src/text/fmt/gtk/Makefile.am
+index 4d96dfd..46ca135 100644
+--- a/src/text/fmt/gtk/Makefile.am
++++ b/src/text/fmt/gtk/Makefile.am
+@@ -6,11 +6,18 @@ noinst_LTLIBRARIES = libgtk.la
+ AM_CPPFLAGS = \
+ 	$(IMPEXP_CPPFLAGS)
+ 
++cut_and_paste_code = \
++	gtktexthandle.c
++	gtktexthandleprivate.h
++
+ libgtk_la_SOURCES = \
++	$(cut_and_paste_code) \
+ 	fv_UnixFrameEdit.cpp \
+ 	fv_UnixFrameEdit.h \
+ 	fv_UnixInlineImage.cpp \
+ 	fv_UnixInlineImage.h \
++	fv_UnixSelectionHandles.cpp \
++	fv_UnixSelectionHandles.h \
+ 	fv_UnixVisualDrag.cpp \
+ 	fv_UnixVisualDrag.h
+ 
+diff --git a/src/text/fmt/gtk/fv_UnixSelectionHandles.cpp b/src/text/fmt/gtk/fv_UnixSelectionHandles.cpp
+new file mode 100644
+index 0000000..935e8fa
+--- /dev/null
++++ b/src/text/fmt/gtk/fv_UnixSelectionHandles.cpp
+@@ -0,0 +1,123 @@
++/* AbiWord - unix impl for selection handles
++ * Copyright (c) 2012 One laptop per child
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version 2
++ * of the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
++ * 02111-1307, USA.
++ *
++ * Author: Carlos Garnacho <carlos@lanedo.com>
++ */
++
++#include "xap_Frame.h"
++#include "xap_UnixFrameImpl.h"
++#include "fv_UnixSelectionHandles.h"
++#include "fv_View.h"
++#include "gtktexthandleprivate.h"
++
++static void handle_dragged_cb (FvTextHandle         *handle,
++                               FvTextHandlePosition  pos,
++                               gint                  x,
++                               gint                  y,
++                               gpointer              user_data)
++{
++	FvTextHandleMode mode;
++	FV_UnixSelectionHandles *handles = static_cast<FV_UnixSelectionHandles *>(user_data);
++
++	mode = _fv_text_handle_get_mode (handle);
++
++	if (pos == FV_TEXT_HANDLE_POSITION_SELECTION_START)
++		handles->updateSelectionStart ((UT_sint32)x, (UT_sint32)y);
++	else {
++		if (mode == FV_TEXT_HANDLE_MODE_SELECTION)
++			handles->updateSelectionEnd ((UT_sint32)x, (UT_sint32)y);
++                else
++			handles->updateCursor((UT_sint32)x, (UT_sint32)y);
++	}
++}
++
++FV_UnixSelectionHandles::FV_UnixSelectionHandles(FV_View *view, FV_Selection selection)
++	: FV_SelectionHandles (view, selection)
++{
++	XAP_Frame * pFrame = static_cast<XAP_Frame*>(m_pView->getParentData());
++	XAP_UnixFrameImpl * pFrameImpl =static_cast<XAP_UnixFrameImpl *>( pFrame->getFrameImpl());
++	GtkWidget * pWidget = pFrameImpl->getViewWidget();
++
++	m_text_handle = _fv_text_handle_new (pWidget);
++        _fv_text_handle_set_relative_to (m_text_handle,
++                                         gtk_widget_get_window (pWidget));
++        g_signal_connect (m_text_handle, "handle-dragged",
++                          G_CALLBACK(handle_dragged_cb), this);
++}
++
++FV_UnixSelectionHandles::~FV_UnixSelectionHandles()
++{
++	g_object_unref (m_text_handle);
++}
++
++void FV_UnixSelectionHandles::hide()
++{
++	_fv_text_handle_set_mode (m_text_handle, FV_TEXT_HANDLE_MODE_NONE);
++}
++
++void FV_UnixSelectionHandles::setCursorCoords(UT_sint32 x, UT_sint32 y, UT_uint32 height, bool visible)
++{
++	GdkRectangle rect;
++
++	_fv_text_handle_set_mode(m_text_handle, FV_TEXT_HANDLE_MODE_CURSOR);
++	_fv_text_handle_set_visible (m_text_handle, FV_TEXT_HANDLE_POSITION_CURSOR, visible);
++
++	if (visible)
++	{
++		rect.x = (int)x;
++		rect.y = (int)y;
++		rect.width = 1;
++		rect.height = (int)height;
++		_fv_text_handle_set_position(m_text_handle,
++					     FV_TEXT_HANDLE_POSITION_CURSOR,
++					     &rect);
++	}
++}
++
++void FV_UnixSelectionHandles::setSelectionCoords(UT_sint32 start_x, UT_sint32 start_y, UT_uint32 start_height, bool start_visible,
++                                                 UT_sint32 end_x, UT_sint32 end_y, UT_uint32 end_height, bool end_visible)
++{
++	GdkRectangle rect;
++
++	_fv_text_handle_set_mode(m_text_handle, FV_TEXT_HANDLE_MODE_SELECTION);
++
++	_fv_text_handle_set_visible (m_text_handle, FV_TEXT_HANDLE_POSITION_SELECTION_START, start_visible);
++	_fv_text_handle_set_visible (m_text_handle, FV_TEXT_HANDLE_POSITION_SELECTION_END, end_visible);
++
++	if (start_visible)
++	{
++		rect.x = (int)start_x;
++		rect.y = (int)start_y;
++		rect.width = 1;
++		rect.height = (int)start_height;
++		_fv_text_handle_set_position(m_text_handle,
++					     FV_TEXT_HANDLE_POSITION_SELECTION_START,
++					     &rect);
++	}
++
++	if (end_visible)
++	{
++		rect.x = (int)end_x;
++		rect.y = (int)end_y;
++		rect.width = 1;
++		rect.height = (int)end_height;
++		_fv_text_handle_set_position(m_text_handle,
++					     FV_TEXT_HANDLE_POSITION_SELECTION_END,
++					     &rect);
++	}
++}
+diff --git a/src/text/fmt/gtk/fv_UnixSelectionHandles.h b/src/text/fmt/gtk/fv_UnixSelectionHandles.h
+new file mode 100644
+index 0000000..809ae2e
+--- /dev/null
++++ b/src/text/fmt/gtk/fv_UnixSelectionHandles.h
+@@ -0,0 +1,45 @@
++/* AbiWord - unix impl for selection handles
++ * Copyright (c) 2012 One laptop per child
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version 2
++ * of the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
++ * 02111-1307, USA.
++ *
++ * Author: Carlos Garnacho <carlos@lanedo.com>
++ */
++
++#ifndef FV_UNIXSELECTIONHANDLES_H
++#define FV_UNIXSELECTIONHANDLES_H
++
++#include "fv_SelectionHandles.h"
++#include "gtktexthandleprivate.h"
++
++class ABI_EXPORT FV_UnixSelectionHandles : public FV_SelectionHandles
++{
++	friend class fv_View;
++
++public:
++	FV_UnixSelectionHandles (FV_View * pView, FV_Selection selection);
++	virtual ~FV_UnixSelectionHandles();
++
++	virtual void hide(void);
++	virtual void setCursorCoords (UT_sint32 x, UT_sint32 y, UT_uint32 height, bool visible);
++	virtual void setSelectionCoords (UT_sint32 start_x, UT_sint32 start_y, UT_uint32 start_height, bool start_visible,
++					 UT_sint32 end_x, UT_sint32 end_y, UT_uint32 end_height, bool end_visible);
++
++private:
++        FvTextHandle *m_text_handle;
++};
++
++#endif /* FV_UNIXSELECTIONHANDLES_H */
+diff --git a/src/text/fmt/gtk/gtktexthandle.c b/src/text/fmt/gtk/gtktexthandle.c
+new file mode 100644
+index 0000000..64a37ed
+--- /dev/null
++++ b/src/text/fmt/gtk/gtktexthandle.c
+@@ -0,0 +1,675 @@
++/* GTK - The GIMP Toolkit
++ * Copyright © 2012 Carlos Garnacho <carlosg@gnome.org>
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library. If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include "gtktexthandleprivate.h"
++#include <gtk/gtk.h>
++
++typedef struct _FvTextHandlePrivate FvTextHandlePrivate;
++typedef struct _HandleWindow HandleWindow;
++
++enum {
++  HANDLE_DRAGGED,
++  DRAG_FINISHED,
++  LAST_SIGNAL
++};
++
++enum {
++  PROP_0,
++  PROP_PARENT,
++  PROP_RELATIVE_TO
++};
++
++struct _HandleWindow
++{
++  GdkWindow *window;
++  GdkRectangle pointing_to;
++  gint dx;
++  gint dy;
++  guint dragged : 1;
++};
++
++struct _FvTextHandlePrivate
++{
++  HandleWindow windows[2];
++  GtkWidget *parent;
++  GdkWindow *relative_to;
++  GtkStyleContext *style_context;
++
++  gulong draw_signal_id;
++  gulong event_signal_id;
++  gulong style_updated_id;
++  gulong composited_changed_id;
++  guint realized : 1;
++  guint mode : 2;
++};
++
++G_DEFINE_TYPE (FvTextHandle, _fv_text_handle, G_TYPE_OBJECT)
++
++static guint signals[LAST_SIGNAL] = { 0 };
++
++static void
++_fv_text_handle_get_size (FvTextHandle *handle,
++                          gint         *width,
++                          gint         *height)
++{
++  FvTextHandlePrivate *priv;
++  gint w, h;
++
++  priv = handle->priv;
++
++  gtk_widget_style_get (priv->parent,
++                        "text-handle-width", &w,
++                        "text-handle-height", &h,
++                        NULL);
++  if (width)
++    *width = w;
++
++  if (height)
++    *height = h;
++}
++
++static void
++_fv_text_handle_draw (FvTextHandle         *handle,
++                      cairo_t              *cr,
++                      FvTextHandlePosition  pos)
++{
++  FvTextHandlePrivate *priv;
++  gint width, height;
++
++  priv = handle->priv;
++  cairo_save (cr);
++
++  cairo_set_operator (cr, CAIRO_OPERATOR_SOURCE);
++  cairo_set_source_rgba (cr, 0, 0, 0, 0);
++  cairo_paint (cr);
++
++  gtk_style_context_save (priv->style_context);
++  gtk_style_context_add_class (priv->style_context, "cursor-handle");
++
++  if (pos == FV_TEXT_HANDLE_POSITION_SELECTION_END)
++    {
++      gtk_style_context_add_class (priv->style_context,
++                                   GTK_STYLE_CLASS_BOTTOM);
++
++      if (priv->mode == FV_TEXT_HANDLE_MODE_CURSOR)
++        gtk_style_context_add_class (priv->style_context, "insert-cursor");
++    }
++  else
++    gtk_style_context_add_class (priv->style_context, "top");
++
++  _fv_text_handle_get_size (handle, &width, &height);
++  gtk_render_background (priv->style_context, cr, 0, 0, width, height);
++
++  gtk_style_context_restore (priv->style_context);
++  cairo_restore (cr);
++}
++
++static void
++_fv_text_handle_update_shape (FvTextHandle         *handle,
++                              GdkWindow            *window,
++                              FvTextHandlePosition  pos)
++{
++  FvTextHandlePrivate *priv;
++  cairo_surface_t *surface;
++  cairo_region_t *region;
++  cairo_t *cr;
++
++  priv = handle->priv;
++
++  surface =
++    gdk_window_create_similar_surface (window,
++                                       CAIRO_CONTENT_COLOR_ALPHA,
++                                       gdk_window_get_width (window),
++                                       gdk_window_get_height (window));
++
++  cr = cairo_create (surface);
++  _fv_text_handle_draw (handle, cr, pos);
++  cairo_destroy (cr);
++
++  region = gdk_cairo_region_create_from_surface (surface);
++
++  if (gtk_widget_is_composited (priv->parent))
++    gdk_window_shape_combine_region (window, NULL, 0, 0);
++  else
++    gdk_window_shape_combine_region (window, region, 0, 0);
++
++  gdk_window_input_shape_combine_region (window, region, 0, 0);
++
++  cairo_surface_destroy (surface);
++  cairo_region_destroy (region);
++}
++
++static GdkWindow *
++_fv_text_handle_create_window (FvTextHandle         *handle,
++                               FvTextHandlePosition  pos)
++{
++  FvTextHandlePrivate *priv;
++  GdkRGBA bg = { 0, 0, 0, 0 };
++  GdkWindowAttr attributes;
++  GdkWindow *window;
++  GdkVisual *visual;
++  gint mask;
++
++  priv = handle->priv;
++
++  attributes.x = 0;
++  attributes.y = 0;
++  _fv_text_handle_get_size (handle, &attributes.width, &attributes.height);
++  attributes.window_type = GDK_WINDOW_TEMP;
++  attributes.wclass = GDK_INPUT_OUTPUT;
++  attributes.event_mask = (GDK_EXPOSURE_MASK |
++                           GDK_BUTTON_PRESS_MASK |
++                           GDK_BUTTON_RELEASE_MASK |
++                           GDK_BUTTON1_MOTION_MASK);
++
++  mask = GDK_WA_X | GDK_WA_Y;
++
++  visual = gdk_screen_get_rgba_visual (gtk_widget_get_screen (priv->parent));
++
++  if (visual)
++    {
++      attributes.visual = visual;
++      mask |= GDK_WA_VISUAL;
++    }
++
++  window = gdk_window_new (NULL, &attributes, mask);
++  gdk_window_set_user_data (window, priv->parent);
++  gdk_window_set_background_rgba (window, &bg);
++
++  _fv_text_handle_update_shape (handle, window, pos);
++
++  return window;
++}
++
++static gboolean
++fv_text_handle_widget_draw (GtkWidget    *widget,
++                            cairo_t      *cr,
++                            FvTextHandle *handle)
++{
++  FvTextHandlePrivate *priv;
++  FvTextHandlePosition pos;
++
++  priv = handle->priv;
++
++  if (!priv->realized)
++    return FALSE;
++
++  if (gtk_cairo_should_draw_window (cr, priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_START].window))
++    pos = FV_TEXT_HANDLE_POSITION_SELECTION_START;
++  else if (gtk_cairo_should_draw_window (cr, priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_END].window))
++    pos = FV_TEXT_HANDLE_POSITION_SELECTION_END;
++  else
++    return FALSE;
++
++  _fv_text_handle_draw (handle, cr, pos);
++  return TRUE;
++}
++
++static gboolean
++fv_text_handle_widget_event (GtkWidget    *widget,
++                             GdkEvent     *event,
++                             FvTextHandle *handle)
++{
++  FvTextHandlePrivate *priv;
++  FvTextHandlePosition pos;
++
++  priv = handle->priv;
++
++  if (event->any.window == priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_START].window)
++    pos = FV_TEXT_HANDLE_POSITION_SELECTION_START;
++  else if (event->any.window == priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_END].window)
++    pos = FV_TEXT_HANDLE_POSITION_SELECTION_END;
++  else
++    return FALSE;
++
++  if (event->type == GDK_BUTTON_PRESS)
++    {
++      priv->windows[pos].dx = event->button.x;
++      priv->windows[pos].dy = event->button.y;
++      priv->windows[pos].dragged = TRUE;
++    }
++  else if (event->type == GDK_BUTTON_RELEASE)
++    {
++      g_signal_emit (handle, signals[DRAG_FINISHED], 0, pos);
++      priv->windows[pos].dx =  priv->windows[pos].dy = 0;
++      priv->windows[pos].dragged = FALSE;
++    }
++  else if (event->type == GDK_MOTION_NOTIFY && priv->windows[pos].dragged)
++    {
++      gint x, y, width, height;
++
++      _fv_text_handle_get_size (handle, &width, &height);
++      gdk_window_get_origin (priv->relative_to, &x, &y);
++
++      x = event->motion.x_root - priv->windows[pos].dx + (width / 2) - x;
++      y = event->motion.y_root - priv->windows[pos].dy - y;
++
++      if (pos == FV_TEXT_HANDLE_POSITION_SELECTION_START)
++        y += height;
++
++      g_signal_emit (handle, signals[HANDLE_DRAGGED], 0, pos, x, y);
++    }
++
++  return TRUE;
++}
++
++static void
++_fv_text_handle_update_window (FvTextHandle         *handle,
++                               FvTextHandlePosition  pos)
++{
++  FvTextHandlePrivate *priv;
++  HandleWindow *handle_window;
++  gboolean visible;
++  gint x, y;
++
++  priv = handle->priv;
++  handle_window = &priv->windows[pos];
++
++  if (!handle_window->window)
++    return;
++
++  /* Get current state and destroy */
++  visible = gdk_window_is_visible (handle_window->window);
++
++  if (visible)
++    {
++      gint width;
++
++      _fv_text_handle_get_size (handle, &width, NULL);
++      gdk_window_get_root_coords (handle_window->window,
++                                  width / 2, 0, &x, &y);
++    }
++
++  gdk_window_destroy (handle_window->window);
++
++  /* Create new window and apply old state */
++  handle_window->window = _fv_text_handle_create_window (handle, pos);
++
++  if (visible)
++    {
++      gdk_window_show (handle_window->window);
++      _fv_text_handle_set_position (handle, pos,
++                                    &handle_window->pointing_to);
++    }
++}
++
++static void
++_fv_text_handle_update_windows (FvTextHandle *handle)
++{
++  FvTextHandlePrivate *priv = handle->priv;
++
++  gtk_style_context_invalidate (priv->style_context);
++  _fv_text_handle_update_window (handle, FV_TEXT_HANDLE_POSITION_SELECTION_START);
++  _fv_text_handle_update_window (handle, FV_TEXT_HANDLE_POSITION_SELECTION_END);
++}
++
++static void
++fv_text_handle_constructed (GObject *object)
++{
++  FvTextHandlePrivate *priv;
++
++  priv = FV_TEXT_HANDLE (object)->priv;
++  g_assert (priv->parent != NULL);
++
++  priv->draw_signal_id =
++    g_signal_connect (priv->parent, "draw",
++                      G_CALLBACK (fv_text_handle_widget_draw),
++                      object);
++  priv->event_signal_id =
++    g_signal_connect (priv->parent, "event",
++                      G_CALLBACK (fv_text_handle_widget_event),
++                      object);
++  priv->composited_changed_id =
++    g_signal_connect_swapped (priv->parent, "composited-changed",
++                              G_CALLBACK (_fv_text_handle_update_windows),
++                              object);
++  priv->style_updated_id =
++    g_signal_connect_swapped (priv->parent, "style-updated",
++                              G_CALLBACK (_fv_text_handle_update_windows),
++                              object);
++}
++
++static void
++fv_text_handle_finalize (GObject *object)
++{
++  FvTextHandlePrivate *priv;
++
++  priv = FV_TEXT_HANDLE (object)->priv;
++
++  if (priv->relative_to)
++    g_object_unref (priv->relative_to);
++
++  if (priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_START].window)
++    gdk_window_destroy (priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_START].window);
++
++  if (priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_END].window)
++    gdk_window_destroy (priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_END].window);
++
++#if 0
++  if (g_signal_handler_is_connected (priv->parent, priv->draw_signal_id))
++    g_signal_handler_disconnect (priv->parent, priv->draw_signal_id);
++
++  if (g_signal_handler_is_connected (priv->parent, priv->event_signal_id))
++    g_signal_handler_disconnect (priv->parent, priv->event_signal_id);
++
++  if (g_signal_handler_is_connected (priv->parent, priv->composited_changed_id))
++    g_signal_handler_disconnect (priv->parent, priv->composited_changed_id);
++
++  if (g_signal_handler_is_connected (priv->parent, priv->style_updated_id))
++    g_signal_handler_disconnect (priv->parent, priv->style_updated_id);
++#endif
++
++  g_object_unref (priv->style_context);
++
++  G_OBJECT_CLASS (_fv_text_handle_parent_class)->finalize (object);
++}
++
++static void
++fv_text_handle_set_property (GObject      *object,
++                             guint         prop_id,
++                             const GValue *value,
++                             GParamSpec   *pspec)
++{
++  FvTextHandlePrivate *priv;
++  FvTextHandle *handle;
++
++  handle = FV_TEXT_HANDLE (object);
++  priv = handle->priv;
++
++  switch (prop_id)
++    {
++    case PROP_PARENT:
++      priv->parent = g_value_get_object (value);
++      break;
++    case PROP_RELATIVE_TO:
++      _fv_text_handle_set_relative_to (handle,
++                                       g_value_get_object (value));
++      break;
++    default:
++      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
++    }
++}
++
++static void
++fv_text_handle_get_property (GObject    *object,
++                             guint       prop_id,
++                             GValue     *value,
++                             GParamSpec *pspec)
++{
++  FvTextHandlePrivate *priv;
++
++  priv = FV_TEXT_HANDLE (object)->priv;
++
++  switch (prop_id)
++    {
++    case PROP_PARENT:
++      g_value_set_object (value, priv->parent);
++      break;
++    case PROP_RELATIVE_TO:
++      g_value_set_object (value, priv->relative_to);
++      break;
++    default:
++      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
++    }
++}
++
++static void
++_fv_text_handle_class_init (FvTextHandleClass *klass)
++{
++  GObjectClass *object_class = G_OBJECT_CLASS (klass);
++
++  object_class->constructed = fv_text_handle_constructed;
++  object_class->finalize = fv_text_handle_finalize;
++  object_class->set_property = fv_text_handle_set_property;
++  object_class->get_property = fv_text_handle_get_property;
++
++  signals[HANDLE_DRAGGED] =
++    g_signal_new ("handle-dragged",
++		  G_OBJECT_CLASS_TYPE (object_class),
++		  G_SIGNAL_RUN_LAST,
++		  G_STRUCT_OFFSET (FvTextHandleClass, handle_dragged),
++		  NULL, NULL,
++                  g_cclosure_marshal_generic,
++		  G_TYPE_NONE, 3,
++                  G_TYPE_INT, G_TYPE_INT, G_TYPE_INT);
++  signals[DRAG_FINISHED] =
++    g_signal_new ("drag-finished",
++		  G_OBJECT_CLASS_TYPE (object_class),
++		  G_SIGNAL_RUN_LAST, 0,
++		  NULL, NULL,
++                  g_cclosure_marshal_VOID__INT,
++                  G_TYPE_NONE, 1, G_TYPE_INT);
++
++  g_object_class_install_property (object_class,
++                                   PROP_PARENT,
++                                   g_param_spec_object ("parent",
++                                                        "Parent widget",
++                                                        "Parent widget",
++                                                        GTK_TYPE_WIDGET,
++                                                        G_PARAM_READWRITE |
++                                                        G_PARAM_CONSTRUCT_ONLY));
++  g_object_class_install_property (object_class,
++                                   PROP_RELATIVE_TO,
++                                   g_param_spec_object ("relative-to",
++                                                        "Window",
++                                                        "Window the coordinates are based upon",
++                                                        GDK_TYPE_WINDOW,
++                                                        G_PARAM_READWRITE));
++
++  g_type_class_add_private (object_class, sizeof (FvTextHandlePrivate));
++}
++
++static void
++_fv_text_handle_init (FvTextHandle *handle)
++{
++  FvTextHandlePrivate *priv;
++  GtkWidgetPath *path;
++
++  handle->priv = priv = G_TYPE_INSTANCE_GET_PRIVATE (handle,
++                                                     FV_TYPE_TEXT_HANDLE,
++                                                     FvTextHandlePrivate);
++
++  path = gtk_widget_path_new ();
++  gtk_widget_path_append_type (path, FV_TYPE_TEXT_HANDLE);
++
++  priv->style_context = gtk_style_context_new ();
++  gtk_style_context_set_path (priv->style_context, path);
++  gtk_widget_path_free (path);
++}
++
++FvTextHandle *
++_fv_text_handle_new (GtkWidget *parent)
++{
++  return g_object_new (FV_TYPE_TEXT_HANDLE,
++                       "parent", parent,
++                       NULL);
++}
++
++void
++_fv_text_handle_set_relative_to (FvTextHandle *handle,
++                                 GdkWindow    *window)
++{
++  FvTextHandlePrivate *priv;
++
++  g_return_if_fail (FV_IS_TEXT_HANDLE (handle));
++  g_return_if_fail (!window || GDK_IS_WINDOW (window));
++
++  priv = handle->priv;
++
++  if (priv->relative_to)
++    {
++      gdk_window_destroy (priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_START].window);
++      gdk_window_destroy (priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_END].window);
++      g_object_unref (priv->relative_to);
++    }
++
++  if (window)
++    {
++      priv->relative_to = g_object_ref (window);
++      priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_START].window =
++        _fv_text_handle_create_window (handle, FV_TEXT_HANDLE_POSITION_SELECTION_START);
++      priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_END].window =
++        _fv_text_handle_create_window (handle, FV_TEXT_HANDLE_POSITION_SELECTION_START);
++      priv->realized = TRUE;
++    }
++  else
++    {
++      priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_START].window = NULL;
++      priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_END].window = NULL;
++      priv->relative_to = NULL;
++      priv->realized = FALSE;
++    }
++
++  g_object_notify (G_OBJECT (handle), "relative-to");
++}
++
++void
++_fv_text_handle_set_mode (FvTextHandle     *handle,
++                          FvTextHandleMode  mode)
++{
++  FvTextHandlePrivate *priv;
++
++  g_return_if_fail (FV_IS_TEXT_HANDLE (handle));
++
++  priv = handle->priv;
++
++  if (priv->mode == mode)
++    return;
++
++  switch (mode)
++    {
++    case FV_TEXT_HANDLE_MODE_CURSOR:
++      /* Only display one handle */
++      gdk_window_show (priv->windows[FV_TEXT_HANDLE_POSITION_CURSOR].window);
++      gdk_window_hide (priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_START].window);
++      break;
++      case FV_TEXT_HANDLE_MODE_SELECTION:
++        /* Display both handles */
++      gdk_window_show (priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_START].window);
++      gdk_window_show (priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_END].window);
++      break;
++    case FV_TEXT_HANDLE_MODE_NONE:
++    default:
++      gdk_window_hide (priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_START].window);
++      gdk_window_hide (priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_END].window);
++      break;
++    }
++
++  priv->mode = mode;
++}
++
++FvTextHandleMode
++_fv_text_handle_get_mode (FvTextHandle *handle)
++{
++  FvTextHandlePrivate *priv;
++
++  g_return_val_if_fail (FV_IS_TEXT_HANDLE (handle), FV_TEXT_HANDLE_MODE_NONE);
++
++  priv = handle->priv;
++  return priv->mode;
++}
++
++void
++_fv_text_handle_set_position (FvTextHandle         *handle,
++                              FvTextHandlePosition  pos,
++                              GdkRectangle         *rect)
++{
++  FvTextHandlePrivate *priv;
++  gint x, y, width, height;
++  HandleWindow *handle_window;
++
++  g_return_if_fail (FV_IS_TEXT_HANDLE (handle));
++
++  priv = handle->priv;
++  pos = CLAMP (pos, FV_TEXT_HANDLE_POSITION_CURSOR,
++               FV_TEXT_HANDLE_POSITION_SELECTION_START);
++
++  if (!priv->realized)
++    return;
++
++  if (priv->mode == FV_TEXT_HANDLE_MODE_NONE ||
++      (priv->mode == FV_TEXT_HANDLE_MODE_CURSOR &&
++       pos != FV_TEXT_HANDLE_POSITION_CURSOR))
++    return;
++
++  gdk_window_get_root_coords (priv->relative_to,
++                              rect->x, rect->y,
++                              &x, &y);
++  _fv_text_handle_get_size (handle, &width, &height);
++  handle_window = &priv->windows[pos];
++
++  if (pos == FV_TEXT_HANDLE_POSITION_CURSOR)
++    y += rect->height;
++  else
++    y -= height;
++
++  x -= width / 2;
++
++  gdk_window_move (handle_window->window, x, y);
++  handle_window->pointing_to = *rect;
++}
++
++void
++_fv_text_handle_set_visible (FvTextHandle         *handle,
++                             FvTextHandlePosition  pos,
++                             gboolean              visible)
++{
++  FvTextHandlePrivate *priv;
++  GdkWindow *window;
++
++  g_return_if_fail (FV_IS_TEXT_HANDLE (handle));
++
++  priv = handle->priv;
++  pos = CLAMP (pos, FV_TEXT_HANDLE_POSITION_CURSOR,
++               FV_TEXT_HANDLE_POSITION_SELECTION_START);
++
++  if (!priv->realized)
++    return;
++
++  window = priv->windows[pos].window;
++
++  if (!window)
++    return;
++
++  if (!visible)
++    gdk_window_hide (window);
++  else
++    {
++      if (priv->mode == FV_TEXT_HANDLE_MODE_NONE ||
++          (priv->mode == FV_TEXT_HANDLE_MODE_CURSOR &&
++           pos != FV_TEXT_HANDLE_POSITION_CURSOR))
++        return;
++
++      if (!gdk_window_is_visible (window))
++        gdk_window_show (window);
++    }
++}
++
++gboolean
++_fv_text_handle_get_is_dragged (FvTextHandle         *handle,
++                                FvTextHandlePosition  pos)
++{
++  FvTextHandlePrivate *priv;
++
++  g_return_val_if_fail (FV_IS_TEXT_HANDLE (handle), FALSE);
++
++  priv = handle->priv;
++  pos = CLAMP (pos, FV_TEXT_HANDLE_POSITION_CURSOR,
++               FV_TEXT_HANDLE_POSITION_SELECTION_START);
++
++  return priv->windows[pos].dragged;
++}
+diff --git a/src/text/fmt/gtk/gtktexthandleprivate.h b/src/text/fmt/gtk/gtktexthandleprivate.h
+new file mode 100644
+index 0000000..d25dc72
+--- /dev/null
++++ b/src/text/fmt/gtk/gtktexthandleprivate.h
+@@ -0,0 +1,90 @@
++/* GTK - The GIMP Toolkit
++ * Copyright © 2012 Carlos Garnacho <carlosg@gnome.org>
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library. If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#ifndef __FV_TEXT_HANDLE_PRIVATE_H__
++#define __FV_TEXT_HANDLE_PRIVATE_H__
++
++#include <gtk/gtk.h>
++
++G_BEGIN_DECLS
++
++#define FV_TYPE_TEXT_HANDLE           (_fv_text_handle_get_type ())
++#define FV_TEXT_HANDLE(o)             (G_TYPE_CHECK_INSTANCE_CAST ((o), FV_TYPE_TEXT_HANDLE, FvTextHandle))
++#define FV_TEXT_HANDLE_CLASS(c)       (G_TYPE_CHECK_CLASS_CAST ((c), FV_TYPE_TEXT_HANDLE, FvTextHandleClass))
++#define FV_IS_TEXT_HANDLE(o)          (G_TYPE_CHECK_INSTANCE_TYPE ((o), FV_TYPE_TEXT_HANDLE))
++#define FV_IS_TEXT_HANDLE_CLASS(o)    (G_TYPE_CHECK_CLASS_TYPE ((o), FV_TYPE_TEXT_HANDLE))
++#define FV_TEXT_HANDLE_GET_CLASS(o)   (G_TYPE_INSTANCE_GET_CLASS ((o), FV_TYPE_TEXT_HANDLE, FvTextHandleClass))
++
++typedef struct _FvTextHandle FvTextHandle;
++typedef struct _FvTextHandleClass FvTextHandleClass;
++
++typedef enum
++{
++  FV_TEXT_HANDLE_POSITION_CURSOR,
++  FV_TEXT_HANDLE_POSITION_SELECTION_START,
++  FV_TEXT_HANDLE_POSITION_SELECTION_END = FV_TEXT_HANDLE_POSITION_CURSOR
++} FvTextHandlePosition;
++
++typedef enum
++{
++  FV_TEXT_HANDLE_MODE_NONE,
++  FV_TEXT_HANDLE_MODE_CURSOR,
++  FV_TEXT_HANDLE_MODE_SELECTION
++} FvTextHandleMode;
++
++struct _FvTextHandle
++{
++  GObject parent_instance;
++  gpointer priv;
++};
++
++struct _FvTextHandleClass
++{
++  GObjectClass parent_class;
++
++  void (* handle_dragged) (FvTextHandle         *handle,
++                           FvTextHandlePosition  pos,
++                           gint                  x,
++                           gint                  y);
++  void (* drag_finished)  (FvTextHandle         *handle,
++                           FvTextHandlePosition  pos);
++};
++
++GType           _fv_text_handle_get_type     (void) G_GNUC_CONST;
++
++FvTextHandle *  _fv_text_handle_new          (GtkWidget             *parent);
++
++void            _fv_text_handle_set_mode     (FvTextHandle          *handle,
++                                              FvTextHandleMode       mode);
++FvTextHandleMode
++                _fv_text_handle_get_mode     (FvTextHandle          *handle);
++void            _fv_text_handle_set_position (FvTextHandle          *handle,
++                                              FvTextHandlePosition   pos,
++                                              GdkRectangle          *rect);
++void            _fv_text_handle_set_visible  (FvTextHandle          *handle,
++                                              FvTextHandlePosition   pos,
++                                              gboolean               visible);
++
++void            _fv_text_handle_set_relative_to (FvTextHandle  *handle,
++                                                 GdkWindow     *window);
++
++gboolean        _fv_text_handle_get_is_dragged (FvTextHandle         *handle,
++                                                FvTextHandlePosition  pos);
++
++G_END_DECLS
++
++#endif /* __FV_TEXT_HANDLE_PRIVATE_H__ */
+diff --git a/src/text/fmt/xp/Makefile.am b/src/text/fmt/xp/Makefile.am
+index c8d1b29..ddaf273 100644
+--- a/src/text/fmt/xp/Makefile.am
++++ b/src/text/fmt/xp/Makefile.am
+@@ -104,6 +104,8 @@ libxp_la_SOURCES = \
+ 	fv_InlineImage.h \
+ 	fv_Selection.cpp \
+ 	fv_Selection.h \
++	fv_SelectionHandles.cpp \
++	fv_SelectionHandles.h \
+ 	fv_View_cmd.cpp \
+ 	fv_View.cpp \
+ 	fv_View.h \
+diff --git a/src/text/fmt/xp/fv_SelectionHandles.cpp b/src/text/fmt/xp/fv_SelectionHandles.cpp
+new file mode 100644
+index 0000000..c8d538b
+--- /dev/null
++++ b/src/text/fmt/xp/fv_SelectionHandles.cpp
+@@ -0,0 +1,120 @@
++/* AbiWord - base class for selection handles
++ * Copyright (c) 2012 One laptop per child
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version 2
++ * of the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
++ * 02111-1307, USA.
++ *
++ * Author: Carlos Garnacho <carlos@lanedo.com>
++ */
++
++#include "fv_View.h"
++#include "fv_SelectionHandles.h"
++#include "fp_Page.h"
++
++FV_SelectionHandles::FV_SelectionHandles (FV_View * pView, FV_Selection pSelection)
++    : m_pView (pView),
++      m_pSelection (pSelection)
++{
++}
++
++bool FV_SelectionHandles::_getPositionCoords(PT_DocPosition pos, UT_sint32& x, UT_sint32& y, UT_uint32& height)
++{
++	UT_sint32 x1, y1, x2, y2;
++	UT_uint32 h;
++	bool bPos, visible = true;
++
++	m_pView->_findPositionCoords (pos,false, x1, y1,
++				   x2, y2, h,
++				   bPos, NULL, NULL);
++
++        if (x1 < 0 || y1 < 0 ||
++            x1 > m_pView->getWindowWidth() ||
++            y1 > m_pView->getWindowHeight() - (UT_sint32) h)
++          visible = false;
++
++	x = m_pView->getGraphics()->tdu(x1);
++	y = m_pView->getGraphics()->tdu(y1);
++	height = m_pView->getGraphics()->tdu(h);
++
++        return visible;
++}
++
++void FV_SelectionHandles::setCursor (PT_DocPosition cursor)
++{
++	UT_sint32 x, y;
++	UT_uint32 height;
++        bool visible;
++
++	visible = _getPositionCoords (cursor, x, y, height);
++	setCursorCoords(x, y, height, visible);
++}
++
++void FV_SelectionHandles::setSelection (PT_DocPosition start, PT_DocPosition end)
++{
++	UT_sint32 start_x, start_y, end_x, end_y;
++	UT_uint32 start_height, end_height;
++        bool start_visible, end_visible;
++
++	start_visible = _getPositionCoords (start, start_x, start_y, start_height);
++	end_visible = _getPositionCoords (end, end_x, end_y, end_height);
++	setSelectionCoords(start_x, start_y, start_height, start_visible,
++			   end_x, end_y, end_height, end_visible);
++}
++
++void FV_SelectionHandles::updateSelectionStart(UT_sint32 x, UT_sint32 y)
++{
++	PT_DocPosition pos, right;
++	fp_Page *page;
++        bool bBOL, bEOL, isTOC;
++        UT_sint32 xClick, yClick;
++
++	x = m_pView->getGraphics()->tlu(x);
++	y = m_pView->getGraphics()->tlu(y);
++	page = m_pView->_getPageForXY(x, y, xClick, yClick);
++        page->mapXYToPosition(xClick, yClick, pos, bBOL, bEOL,isTOC, true, NULL);
++        right = m_pView->getSelectionRightAnchor();
++
++        pos = UT_MIN (pos, right - 1);
++
++        m_pView->selectRange(pos, right);
++}
++
++void FV_SelectionHandles::updateSelectionEnd(UT_sint32 x, UT_sint32 y)
++{
++	PT_DocPosition pos, left;
++	fp_Page *page;
++        bool bBOL, bEOL, isTOC;
++        UT_sint32 xClick, yClick;
++
++	x = m_pView->getGraphics()->tlu(x);
++	y = m_pView->getGraphics()->tlu(y);
++	page = m_pView->_getPageForXY(x, y, xClick, yClick);
++        page->mapXYToPosition(xClick, yClick, pos, bBOL, bEOL,isTOC, true, NULL);
++        left = m_pView->getSelectionLeftAnchor();
++
++        pos = UT_MAX (pos, left + 1);
++
++        m_pView->selectRange(left, pos);
++}
++
++void FV_SelectionHandles::updateCursor(UT_sint32 x, UT_sint32 y)
++{
++	x = m_pView->getGraphics()->tlu(x);
++	y = m_pView->getGraphics()->tlu(y);
++	m_pView->warpInsPtToXY(x, y, false);
++}
++
++FV_SelectionHandles::~FV_SelectionHandles() {
++}
+diff --git a/src/text/fmt/xp/fv_SelectionHandles.h b/src/text/fmt/xp/fv_SelectionHandles.h
+new file mode 100644
+index 0000000..d998f5e
+--- /dev/null
++++ b/src/text/fmt/xp/fv_SelectionHandles.h
+@@ -0,0 +1,56 @@
++/* AbiWord - base class for selection handles
++ * Copyright (c) 2012 One laptop per child
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version 2
++ * of the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
++ * 02111-1307, USA.
++ *
++ * Author: Carlos Garnacho <carlos@lanedo.com>
++ */
++
++#ifndef FV_SELECTIONHANDLES_H
++#define FV_SELECTIONHANDLES_H
++
++#include "pt_Types.h"
++#include "fv_Selection.h"
++
++class FV_View;
++
++class ABI_EXPORT FV_SelectionHandles
++{
++public:
++	FV_SelectionHandles (FV_View * pView, FV_Selection selection);
++	virtual ~FV_SelectionHandles();
++
++	virtual void hide(void) {}
++	virtual void setCursorCoords(UT_sint32 /*x*/, UT_sint32 /*y*/, UT_uint32 /*height*/, bool /*visible*/) {}
++	virtual void setSelectionCoords(UT_sint32 /*start_x*/, UT_sint32 /*start_y*/, UT_uint32 /*start_height*/, bool /*start_visible*/,
++	                                UT_sint32 /*end_x*/, UT_sint32 /*end_y*/, UT_uint32 /*end_height*/, bool /*end_visible*/) {}
++
++	void setCursor(PT_DocPosition cursor);
++	void setSelection(PT_DocPosition start, PT_DocPosition end);
++
++	void updateSelectionStart(UT_sint32 x, UT_sint32 y);
++	void updateSelectionEnd(UT_sint32 x, UT_sint32 y);
++	void updateCursor(UT_sint32 x, UT_sint32 y);
++
++protected:
++	FV_View *             m_pView;
++	FV_Selection          m_pSelection;
++
++private:
++	bool _getPositionCoords(PT_DocPosition pos, UT_sint32& x, UT_sint32& y, UT_uint32& height);
++};
++
++#endif /* FV_SELECTIONHANDLES_H */
+diff --git a/src/text/fmt/xp/fv_View.cpp b/src/text/fmt/xp/fv_View.cpp
+index cb5d904..9e78a85 100644
+--- a/src/text/fmt/xp/fv_View.cpp
++++ b/src/text/fmt/xp/fv_View.cpp
+@@ -300,6 +300,7 @@ FV_View::FV_View(XAP_App * pApp, void* pParentData, FL_DocLayout* pLayout)
+ 		m_bAllowSmartQuoteReplacement(true),
+ 		m_bubbleBlockerCount(0),
+ 		m_iOldPageCount(-1),
++		m_SelectionHandles(this, m_Selection),
+ 		m_pViewDoubleBufferingObject(NULL)
+ {
+ 	if(m_pDoc)
+@@ -945,7 +946,6 @@ void FV_View::replaceGraphics(GR_Graphics * pG)
+ 	m_pLayout->rebuildFromHere(static_cast<fl_DocSectionLayout *>(m_pLayout->getFirstSection()));
+ }
+ 
+-
+ //-------------------------
+ // Visual Drag stuff
+ //
+@@ -2481,6 +2481,7 @@ void FV_View::focusChange(AV_Focus focus)
+ 			_setPoint(getPoint());
+ 		}
+ 		m_pApp->rememberFocussedFrame(m_pParentData);
++		_updateSelectionHandles();
+ 		break;
+ 	case AV_FOCUS_NEARBY:
+ 		if (isSelectionEmpty() && (getPoint() > 0))
+@@ -2497,6 +2498,7 @@ void FV_View::focusChange(AV_Focus focus)
+ 		}
+ 		break;
+ 	case AV_FOCUS_NONE:
++		m_SelectionHandles.hide();
+ 		if (isSelectionEmpty() && (getPoint() > 0))
+ 		{
+ 			m_pG->allCarets()->disable(true);
+@@ -6996,6 +6998,13 @@ PT_DocPosition FV_View::getDocPositionFromXY(UT_sint32 xpos, UT_sint32 ypos, boo
+ 	return iNewPoint;
+ }
+ 
++void FV_View::setVisualSelectionEnabled(bool bActive)
++{
++	if (!bActive)
++		m_SelectionHandles.hide();
++	m_VisualSelectionActive=bActive;
++}
++
+ void FV_View::extSelToXY(UT_sint32 xPos, UT_sint32 yPos, bool bDrag)
+ {
+ 	// Figure out which page we clicked on.
+@@ -7056,6 +7065,7 @@ void FV_View::extSelToXY(UT_sint32 xPos, UT_sint32 yPos, bool bDrag)
+ 	{
+ 		_extSelToPos(iNewPoint);
+ 		notifyListeners(AV_CHG_MOTION);
++		_updateSelectionHandles();
+ 	}
+ }
+ 
+@@ -8098,6 +8108,7 @@ void FV_View::warpInsPtToXY(UT_sint32 xPos, UT_sint32 yPos, bool bClick = false)
+ 	_setPoint(pos, bEOL);
+ 	_ensureInsertionPointOnScreen();
+ 	setCursorToContext();
++	_updateSelectionHandles();
+ 	notifyListeners(AV_CHG_MOTION | AV_CHG_HDRFTR ); // Sevior Put this in
+ //	notifyListeners(AV_CHG_HDRFTR );
+ 
+@@ -8309,6 +8320,7 @@ void FV_View::setXScrollOffset(UT_sint32 v) ///////////////////////TODO: Fix thi
+ 	_draw(x1-m_pG->tlu(1), 0, dx2+m_pG->tlu(2), getWindowHeight(), false, true);
+ 
+ 	_fixInsertionPointCoords();
++	_updateSelectionHandles();
+ }
+ 
+ void FV_View::setYScrollOffset(UT_sint32 v)
+@@ -8323,6 +8335,7 @@ void FV_View::setYScrollOffset(UT_sint32 v)
+ 	m_yScrollOffset = v;
+ 
+ 	_fixInsertionPointCoords();
++	_updateSelectionHandles();
+ }
+ 
+ void FV_View::draw(int page, dg_DrawArgs* da)
+@@ -14413,11 +14426,14 @@ bool FV_View::rtlPages() const
+ void
+ FV_View::selectRange( PT_DocPosition start, PT_DocPosition end )
+ {
+-	_clearSelection();
++	_clearSelection(false);
+ 	_setPoint(start);
++	m_Selection.setSelectionLeftAnchor(start);
+ 	_setSelectionAnchor();
+ 	setPoint(end);
++	m_Selection.setSelectionRightAnchor(end);
+ 	_drawSelection();
++	_updateSelectionHandles();
+ }
+ 
+ void
+diff --git a/src/text/fmt/xp/fv_View.h b/src/text/fmt/xp/fv_View.h
+index a361692..46d16ab 100644
+--- a/src/text/fmt/xp/fv_View.h
++++ b/src/text/fmt/xp/fv_View.h
+@@ -47,8 +47,10 @@
+ #include "fv_UnixVisualDrag.h"
+ #include "fv_UnixFrameEdit.h"
+ #include "fv_UnixInlineImage.h"
++#include "fv_UnixSelectionHandles.h"
+ #else
+ #include "fv_VisualDragText.h"
++#include "fv_SelectionHandles.h"
+ #endif
+ 
+ #define AUTO_SCROLL_MSECS	100
+@@ -237,6 +239,7 @@ class ABI_EXPORT FV_View : public AV_View
+ 	friend class CellLine;
+     friend class FV_View_BubbleBlocker;
+ 	friend class FV_ViewDoubleBuffering;
++	friend class FV_SelectionHandles;
+ public:
+ 	FV_View(XAP_App*, void*, FL_DocLayout*);
+ 	virtual ~FV_View();
+@@ -266,12 +269,15 @@ public:
+ 
+ 	virtual void	draw(const UT_Rect* pRect=static_cast<UT_Rect*>(NULL));
+ 	virtual void 	drawSelectionBox(UT_Rect & box, bool drawHandles);
++
++	void			setVisualSelectionEnabled(bool bActive);
+ private:
+ 	inline void 	_drawResizeHandle(UT_Rect & box);
+     void getCmdInsertRangeVariables( PT_DocPosition& posStart,
+                                      PT_DocPosition& posEnd,
+                                      fl_BlockLayout*& pBL1,
+                                      fl_BlockLayout*& pBL2 );
++	void _updateSelectionHandles (void);
+ 
+ 
+ public:
+@@ -945,7 +951,7 @@ protected:
+ 									 const gchar ** extra_props = NULL);
+ 	void				_moveToSelectionEnd(bool bForward);
+ 	void				_eraseSelection(void);
+-	void				_clearSelection(void);
++	void				_clearSelection(bool bRedraw = true);
+ 	void				_resetSelection(void);
+ 	void				_setSelectionAnchor(void);
+ 	void				_deleteSelection(PP_AttrProp *p_AttrProp_Before = NULL,
+@@ -1163,6 +1169,12 @@ private:
+     int                 m_bubbleBlockerCount;
+ 	UT_sint32           m_iOldPageCount;
+ 
++#ifdef TOOLKIT_GTK_ALL
++	FV_UnixSelectionHandles m_SelectionHandles;
++#else
++	FV_SelectionHandles m_SelectionHandles;
++#endif
++
+ public:
+ 	bool registerDoubleBufferingObject(FV_ViewDoubleBuffering *obj);
+ 	bool unregisterDoubleBufferingObject(FV_ViewDoubleBuffering *obj);
+diff --git a/src/text/fmt/xp/fv_View_cmd.cpp b/src/text/fmt/xp/fv_View_cmd.cpp
+index b153dee..0851091 100644
+--- a/src/text/fmt/xp/fv_View_cmd.cpp
++++ b/src/text/fmt/xp/fv_View_cmd.cpp
+@@ -4674,6 +4674,7 @@ void FV_View::cmdCut(void)
+ 	_ensureInsertionPointOnScreen();
+ 	notifyListeners(AV_CHG_ALL);
+ 
++	m_SelectionHandles.hide();
+ }
+ 
+ // bToClipboard is true if you want to copy to the CLIPBOARD
+diff --git a/src/text/fmt/xp/fv_View_protected.cpp b/src/text/fmt/xp/fv_View_protected.cpp
+index b5c1a85..df3234c 100644
+--- a/src/text/fmt/xp/fv_View_protected.cpp
++++ b/src/text/fmt/xp/fv_View_protected.cpp
+@@ -174,7 +174,7 @@ void FV_View::_eraseSelection(void)
+ 	_clearBetweenPositions(iPos1, iPos2, true);
+ }
+ 
+-void FV_View::_clearSelection(void)
++void FV_View::_clearSelection(bool bRedraw)
+ {
+ 	if( isSelectionEmpty() )
+ 	{
+@@ -211,7 +211,8 @@ void FV_View::_clearSelection(void)
+ 		m_iLowDrawPoint = 0;
+ 		m_iHighDrawPoint = 0;
+ 
+- 		_drawBetweenPositions(iPos1, iPos2);
++		if (bRedraw)
++			_drawBetweenPositions(iPos1, iPos2);
+ 	}
+ 	else
+ 	{
+@@ -235,7 +236,9 @@ void FV_View::_clearSelection(void)
+ 				{
+ 					iPos2++;
+ 				}
+-				/*bool bres =*/ _clearBetweenPositions(iPos1, iPos2, true);
++
++				if (bRedraw)
++					/*bool bres =*/ _clearBetweenPositions(iPos1, iPos2, true);
+ 			}
+ 		}
+ 		_resetSelection();
+@@ -250,7 +253,8 @@ void FV_View::_clearSelection(void)
+ 				{
+ 					iPos2++;
+ 				}
+-				_drawBetweenPositions(iPos1, iPos2);
++				if (bRedraw)
++					_drawBetweenPositions(iPos1, iPos2);
+ 			}
+ 		}
+ 		UT_VECTOR_PURGEALL(PD_DocumentRange *,vecRanges);
+@@ -6440,3 +6444,15 @@ void FV_View::_adjustDeletePosition(UT_uint32 &iDocPos, UT_uint32 &iCount)
+ 	// adjust point
+ 	iDocPos = pos1;
+ }
++
++void FV_View::_updateSelectionHandles(void)
++{
++	if (!getVisualSelectionEnabled()){
++		m_SelectionHandles.hide();
++	} else if (isSelectionEmpty()) {
++		m_SelectionHandles.setCursor(getInsPoint());
++	} else {
++		m_SelectionHandles.setSelection(getSelectionLeftAnchor(),
++										getSelectionRightAnchor());
++	}
++}
+diff --git a/src/wp/ap/gtk/ap_UnixFrameImpl.cpp b/src/wp/ap/gtk/ap_UnixFrameImpl.cpp
+index 385b104..b5266ac 100644
+--- a/src/wp/ap/gtk/ap_UnixFrameImpl.cpp
++++ b/src/wp/ap/gtk/ap_UnixFrameImpl.cpp
+@@ -363,6 +363,11 @@ GtkWidget * AP_UnixFrameImpl::_createDocumentWindow()
+ 	return m_wSunkenBox;
+ }
+ 
++GtkWidget * AP_UnixFrameImpl::getViewWidget(void)
++{
++	return m_dArea;
++}
++
+ void AP_UnixFrameImpl::_hideMenuScroll(bool bHideMenuScroll)
+ {
+   if(bHideMenuScroll)
+diff --git a/src/wp/ap/gtk/ap_UnixFrameImpl.h b/src/wp/ap/gtk/ap_UnixFrameImpl.h
+index 388d761..01b45f8 100644
+--- a/src/wp/ap/gtk/ap_UnixFrameImpl.h
++++ b/src/wp/ap/gtk/ap_UnixFrameImpl.h
+@@ -48,6 +48,7 @@ class AP_UnixFrameImpl : public XAP_UnixFrameImpl
+ 	GtkWidget * getDrawingArea() const {return m_dArea;}
+ 	static gboolean ap_focus_in_event (GtkWidget * drawing_area, GdkEventCrossing *event, AP_UnixFrameImpl * me);
+ 	static gboolean ap_focus_out_event (GtkWidget * drawing_area, GdkEventCrossing *event, AP_UnixFrameImpl * me);
++	virtual GtkWidget * getViewWidget(void);
+ 
+  protected:
+ 	friend class AP_UnixFrame;

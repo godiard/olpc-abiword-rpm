@@ -1,0 +1,98 @@
+diff --git a/src/af/ev/gtk/ev_UnixMouse.cpp b/src/af/ev/gtk/ev_UnixMouse.cpp
+index af3cb2a..2ca54ec 100644
+--- a/src/af/ev/gtk/ev_UnixMouse.cpp
++++ b/src/af/ev/gtk/ev_UnixMouse.cpp
+@@ -164,7 +164,7 @@ void EV_UnixMouse::mouseClick(AV_View* pView, GdkEventButton* e)
+ 		invokeMouseMethod(pView,pEM,static_cast<UT_sint32>(pView->getGraphics()->tluD(e->x)),static_cast<UT_sint32>(pView->getGraphics()->tluD(e->y)));
+ 		signal(emc|mop|emb|state, static_cast<UT_sint32>(pView->getGraphics()->tluD(e->x)),static_cast<UT_sint32>(pView->getGraphics()->tluD(e->y)));
+ 
+-		if (gdk_device_get_source (device) == GDK_SOURCE_TOUCHSCREEN) {
++		if (gdk_device_get_source (device) == GDK_SOURCE_TOUCHSCREEN || getenv ("ABI_TEST_TOUCH")) {
+ 			pView->setVisualSelectionEnabled(true);
+ 		} else {
+ 			pView->setVisualSelectionEnabled(false);
+diff --git a/src/text/fmt/gtk/gtktexthandle.c b/src/text/fmt/gtk/gtktexthandle.c
+index 64a37ed..766eb8b 100644
+--- a/src/text/fmt/gtk/gtktexthandle.c
++++ b/src/text/fmt/gtk/gtktexthandle.c
+@@ -523,7 +523,7 @@ _fv_text_handle_set_relative_to (FvTextHandle *handle,
+       priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_START].window =
+         _fv_text_handle_create_window (handle, FV_TEXT_HANDLE_POSITION_SELECTION_START);
+       priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_END].window =
+-        _fv_text_handle_create_window (handle, FV_TEXT_HANDLE_POSITION_SELECTION_START);
++        _fv_text_handle_create_window (handle, FV_TEXT_HANDLE_POSITION_SELECTION_END);
+       priv->realized = TRUE;
+     }
+   else
+@@ -550,6 +550,12 @@ _fv_text_handle_set_mode (FvTextHandle     *handle,
+   if (priv->mode == mode)
+     return;
+ 
++  priv->mode = mode;
++
++  if (mode != FV_TEXT_HANDLE_MODE_NONE)
++    _fv_text_handle_update_shape (handle,
++                                  priv->windows[FV_TEXT_HANDLE_POSITION_CURSOR].window,
++                                  FV_TEXT_HANDLE_POSITION_CURSOR);
+   switch (mode)
+     {
+     case FV_TEXT_HANDLE_MODE_CURSOR:
+@@ -568,8 +574,6 @@ _fv_text_handle_set_mode (FvTextHandle     *handle,
+       gdk_window_hide (priv->windows[FV_TEXT_HANDLE_POSITION_SELECTION_END].window);
+       break;
+     }
+-
+-  priv->mode = mode;
+ }
+ 
+ FvTextHandleMode
+@@ -645,6 +649,9 @@ _fv_text_handle_set_visible (FvTextHandle         *handle,
+   if (!window)
+     return;
+ 
++  if (priv->windows[pos].dragged)
++    return;
++
+   if (!visible)
+     gdk_window_hide (window);
+   else
+diff --git a/src/text/fmt/xp/fv_SelectionHandles.cpp b/src/text/fmt/xp/fv_SelectionHandles.cpp
+index c8d538b..8c6cc4b 100644
+--- a/src/text/fmt/xp/fv_SelectionHandles.cpp
++++ b/src/text/fmt/xp/fv_SelectionHandles.cpp
+@@ -107,6 +107,8 @@ void FV_SelectionHandles::updateSelectionEnd(UT_sint32 x, UT_sint32 y)
+         pos = UT_MAX (pos, left + 1);
+ 
+         m_pView->selectRange(left, pos);
++	m_pView->_fixInsertionPointCoords();
++	m_pView->ensureInsertionPointOnScreen();
+ }
+ 
+ void FV_SelectionHandles::updateCursor(UT_sint32 x, UT_sint32 y)
+diff --git a/src/text/fmt/xp/fv_View.cpp b/src/text/fmt/xp/fv_View.cpp
+index 9e78a85..5948ebe 100644
+--- a/src/text/fmt/xp/fv_View.cpp
++++ b/src/text/fmt/xp/fv_View.cpp
+@@ -14426,13 +14426,22 @@ bool FV_View::rtlPages() const
+ void
+ FV_View::selectRange( PT_DocPosition start, PT_DocPosition end )
+ {
++	PT_DocPosition prev_start, prev_end;
++
++	prev_start = m_Selection.getSelectionLeftAnchor();
++	prev_end = m_Selection.getSelectionRightAnchor();
++
++	if (prev_start == start && prev_end == end)
++		return;
++
+ 	_clearSelection(false);
+ 	_setPoint(start);
+ 	m_Selection.setSelectionLeftAnchor(start);
+ 	_setSelectionAnchor();
+ 	setPoint(end);
+ 	m_Selection.setSelectionRightAnchor(end);
+-	_drawSelection();
++
++	_drawBetweenPositions(MIN (prev_start, start), MAX (prev_end, end));
+ 	_updateSelectionHandles();
+ }
