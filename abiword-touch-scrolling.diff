@@ -1,0 +1,215 @@
+diff --git a/src/af/ev/gtk/ev_UnixMouse.cpp b/src/af/ev/gtk/ev_UnixMouse.cpp
+index 2ca54ec..a9cc958 100644
+--- a/src/af/ev/gtk/ev_UnixMouse.cpp
++++ b/src/af/ev/gtk/ev_UnixMouse.cpp
+@@ -33,7 +33,12 @@
+ #include "gr_Graphics.h"
+ 
+ EV_UnixMouse::EV_UnixMouse(EV_EditEventMapper * pEEM)
+-	: EV_Mouse(pEEM)
++	: EV_Mouse(pEEM),
++	  m_iInitialOffset(0),
++	  m_bLastTouchValid(FALSE),
++	  m_bTouchOngoing(FALSE),
++	  m_bScrollDragOngoing(FALSE),
++	  m_pThresholdTimer(NULL)
+ {
+ }
+ 
+@@ -45,7 +50,33 @@ void EV_UnixMouse::mouseUp(AV_View* pView, GdkEventButton* e)
+ 	EV_EditMouseButton emb = 0;
+ 	EV_EditMouseOp mop;
+ 	EV_EditMouseContext emc = 0;
+-	
++	GdkDevice *device;
++
++	device = gdk_event_get_source_device((GdkEvent *) e);
++
++	if (gdk_device_get_source (device) == GDK_SOURCE_TOUCHSCREEN)
++        {
++		if (m_pThresholdTimer)
++			m_pThresholdTimer->stop ();
++
++		m_bLastTouchValid = FALSE;
++
++		if (!m_bScrollDragOngoing)
++		{
++			if (m_bTouchOngoing)
++				m_pThresholdTimer->fire ();
++
++			m_bTouchOngoing = FALSE;
++			m_bLastTouchValid = TRUE;
++		}
++		else
++		{
++			m_bScrollDragOngoing = FALSE;
++			m_bTouchOngoing = FALSE;
++			return;
++		}
++	}
++
+ 	if (e->state & GDK_SHIFT_MASK)
+ 		ems |= EV_EMS_SHIFT;
+ 	if (e->state & GDK_CONTROL_MASK)
+@@ -103,6 +134,52 @@ void EV_UnixMouse::mouseUp(AV_View* pView, GdkEventButton* e)
+ 	}
+ }
+ 
++void EV_UnixMouse::stopScroll (UT_Worker* pWorker)
++{
++	EV_UnixMouse * pMouse = static_cast<EV_UnixMouse *>(pWorker->getInstanceData());
++	EV_EditMethod * pEM;
++	EV_EditModifierState state = 0;
++	EV_EditEventMapperResult result;
++	EV_EditMouseButton emb = 0;
++	EV_EditMouseOp mop = 0;
++	EV_EditMouseContext emc = 0;
++	AV_View* pView = pMouse->m_pScrolledView;
++
++	pMouse->m_bTouchOngoing = FALSE;
++	pMouse->m_bLastTouchValid = FALSE;
++	pMouse->m_bScrollDragOngoing = FALSE;
++	pWorker->stop();
++
++	emb = EV_EMB_BUTTON1;
++	mop = EV_EMO_SINGLECLICK;
++	emc = pView->getMouseContext(static_cast<UT_sint32>(pView->getGraphics()->tluD((gdouble) pMouse->m_iLastTouchX)),static_cast<UT_sint32>(pView->getGraphics()->tluD((gdouble) pMouse->m_iLastTouchY)));
++
++	pMouse->m_clickState = mop;					// remember which type of click
++	pMouse->m_contextState = emc;				// remember context of click
++
++	result = pMouse->m_pEEM->Mouse(emc|mop|emb|state, &pEM);
++
++	switch (result)
++	{
++	case EV_EEMR_COMPLETE:
++		UT_ASSERT(pEM);
++		pMouse->invokeMouseMethod(pView,pEM,static_cast<UT_sint32>(pView->getGraphics()->tluD((gdouble) pMouse->m_iLastTouchX)),static_cast<UT_sint32>(pView->getGraphics()->tluD((gdouble) pMouse->m_iLastTouchY)));
++		pMouse->signal(emc|mop|emb|state, static_cast<UT_sint32>(pView->getGraphics()->tluD((gdouble) pMouse->m_iLastTouchX)),static_cast<UT_sint32>(pView->getGraphics()->tluD((gdouble) pMouse->m_iLastTouchY)));
++		pView->setVisualSelectionEnabled(true);
++		return;
++	case EV_EEMR_INCOMPLETE:
++		// I'm not sure this makes any sense, but we allow it.
++		return;
++	case EV_EEMR_BOGUS_START:
++	case EV_EEMR_BOGUS_CONT:
++		// TODO What to do ?? Should we beep at them or just be quiet ??
++		return;
++	default:
++		UT_ASSERT(0);
++		return;
++	}
++}
++
+ void EV_UnixMouse::mouseClick(AV_View* pView, GdkEventButton* e)
+ {
+ 	EV_EditMethod * pEM;
+@@ -115,6 +192,36 @@ void EV_UnixMouse::mouseClick(AV_View* pView, GdkEventButton* e)
+ 
+ 	device = gdk_event_get_source_device((GdkEvent *) e);
+ 
++        if (gdk_device_get_source (device) == GDK_SOURCE_TOUCHSCREEN)
++        {
++		m_iInitialOffset = pView->getYScrollOffset();
++		m_bTouchOngoing = TRUE;
++
++                if (!m_bLastTouchValid ||
++                    (ABS (m_iLastTouchX - e->x) > 32 ||
++		     ABS (m_iLastTouchY - e->y) > 32))
++		{
++			m_iTouchX = (gint) e->x;
++			m_iTouchY = (gint) e->y;
++			m_iLastTouchX = (int) e->x;
++			m_iLastTouchY = (int) e->y;
++
++			if (m_pThresholdTimer)
++				m_pThresholdTimer->stop();
++			else
++			{
++				m_pScrolledView = pView;
++				m_pThresholdTimer = UT_Timer::static_constructor(stopScroll, this);
++			}
++
++			m_pThresholdTimer->set(1000);
++			return;
++                }
++
++		m_iLastTouchX = (int) e->x;
++		m_iLastTouchY = (int) e->y;
++        }
++
+ 	if (e->button == 1)
+ 		emb = EV_EMB_BUTTON1;
+ 	else if (e->button == 2)
+@@ -195,6 +302,31 @@ void EV_UnixMouse::mouseMotion(AV_View* pView, GdkEventMotion *e)
+ 
+ 	device = gdk_event_get_source_device((GdkEvent *) e);
+ 
++        if (gdk_device_get_source (device) == GDK_SOURCE_TOUCHSCREEN && m_bTouchOngoing)
++        {
++		gint dx, dy;
++		UT_sint32 sy;
++
++		dx = m_iTouchX - (int) e->x;
++		dy = m_iTouchY - (int) e->y;
++
++		if (m_bScrollDragOngoing ||
++		    (ABS(dx) > 32 || ABS(dy) > 32))
++		{
++			if (m_pThresholdTimer)
++				m_pThresholdTimer->stop();
++
++			sy = pView->getGraphics()->tluD(dy) + m_iInitialOffset;
++			sy = MAX (0, sy);
++
++			pView->sendVerticalScrollEvent(sy);
++			pView->setYScrollOffset (sy);
++			m_bScrollDragOngoing = TRUE;
++		}
++
++		return;
++        }
++
+ 	if (e->state & GDK_SHIFT_MASK)
+ 		ems |= EV_EMS_SHIFT;
+ 	if (e->state & GDK_CONTROL_MASK)
+diff --git a/src/af/ev/gtk/ev_UnixMouse.h b/src/af/ev/gtk/ev_UnixMouse.h
+index 94922c3..1aac31f 100644
+--- a/src/af/ev/gtk/ev_UnixMouse.h
++++ b/src/af/ev/gtk/ev_UnixMouse.h
+@@ -25,11 +25,15 @@
+ #include <gdk/gdk.h>
+ 
+ #include "ut_types.h"
++#include "ut_timer.h"
+ #include "ev_Mouse.h"
+ #include "ev_EditBits.h"
+ 
+ /*****************************************************************/
+ 
++class UT_Worker;
++class UT_Timer;
++
+ class EV_UnixMouse : public EV_Mouse
+ {
+ public:
+@@ -41,6 +45,19 @@ public:
+ 	void mouseScroll(AV_View* pView, GdkEventScroll *e);
+ 
+ protected:
++	static void stopScroll(UT_Worker * pWorker);
++
++        gint m_iLastTouchX;
++        gint m_iLastTouchY;
++        gint m_iTouchX;
++        gint m_iTouchY;
++	UT_sint32 m_iInitialOffset;
++
++        bool m_bLastTouchValid;
++        bool m_bTouchOngoing;
++	bool m_bScrollDragOngoing;
++	AV_View * m_pScrolledView;
++	UT_Timer * m_pThresholdTimer;
+ };
+ 
+ #endif // EV_UNIXMOUSE_H

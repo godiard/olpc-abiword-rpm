@@ -1,0 +1,34 @@
+diff --git a/src/text/fmt/gtk/gtktexthandle.c b/src/text/fmt/gtk/gtktexthandle.c
+index 6ff0ffa..8957911 100644
+--- a/src/text/fmt/gtk/gtktexthandle.c
++++ b/src/text/fmt/gtk/gtktexthandle.c
+@@ -262,10 +262,6 @@ fv_text_handle_widget_event (GtkWidget    *widget,
+ 
+       x = event->motion.x_root - priv->windows[pos].dx + (width / 2) - x;
+       y = event->motion.y_root - priv->windows[pos].dy - y;
+-
+-      if (pos == FV_TEXT_HANDLE_POSITION_SELECTION_START)
+-        y += height;
+-
+       g_signal_emit (handle, signals[HANDLE_DRAGGED], 0, pos, x, y);
+     }
+ 
+@@ -290,16 +286,9 @@ _fv_text_handle_update_window_state (FvTextHandle         *handle,
+     {
+       gint x, y, width, height;
+ 
+-      x = handle_window->pointing_to.x;
+-      y = handle_window->pointing_to.y;
+       _fv_text_handle_get_size (handle, &width, &height);
+-
+-      if (pos == FV_TEXT_HANDLE_POSITION_CURSOR)
+-        y += handle_window->pointing_to.height;
+-      else
+-        y -= height;
+-
+-      x -= width / 2;
++      x = handle_window->pointing_to.x - (width / 2);
++      y = handle_window->pointing_to.y + handle_window->pointing_to.height;
+ 
+       gdk_window_move_resize (handle_window->window, x, y, width, height);
+       gdk_window_show (handle_window->window);
