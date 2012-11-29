@@ -1,10 +1,13 @@
 diff --git a/src/af/ev/gtk/ev_UnixMouse.cpp b/src/af/ev/gtk/ev_UnixMouse.cpp
-index 2ca54ec..a9cc958 100644
+index 2ca54ec..8c1d4ed 100644
 --- a/src/af/ev/gtk/ev_UnixMouse.cpp
 +++ b/src/af/ev/gtk/ev_UnixMouse.cpp
-@@ -33,7 +33,12 @@
+@@ -32,8 +32,15 @@
+ #include "xav_View.h"
  #include "gr_Graphics.h"
  
++#define RELEASE_SCROLL_TIMEOUT 800
++
  EV_UnixMouse::EV_UnixMouse(EV_EditEventMapper * pEEM)
 -	: EV_Mouse(pEEM)
 +	: EV_Mouse(pEEM),
@@ -16,7 +19,7 @@ index 2ca54ec..a9cc958 100644
  {
  }
  
-@@ -45,7 +50,33 @@ void EV_UnixMouse::mouseUp(AV_View* pView, GdkEventButton* e)
+@@ -45,7 +52,33 @@ void EV_UnixMouse::mouseUp(AV_View* pView, GdkEventButton* e)
  	EV_EditMouseButton emb = 0;
  	EV_EditMouseOp mop;
  	EV_EditMouseContext emc = 0;
@@ -51,7 +54,7 @@ index 2ca54ec..a9cc958 100644
  	if (e->state & GDK_SHIFT_MASK)
  		ems |= EV_EMS_SHIFT;
  	if (e->state & GDK_CONTROL_MASK)
-@@ -103,6 +134,52 @@ void EV_UnixMouse::mouseUp(AV_View* pView, GdkEventButton* e)
+@@ -103,6 +136,52 @@ void EV_UnixMouse::mouseUp(AV_View* pView, GdkEventButton* e)
  	}
  }
  
@@ -104,7 +107,7 @@ index 2ca54ec..a9cc958 100644
  void EV_UnixMouse::mouseClick(AV_View* pView, GdkEventButton* e)
  {
  	EV_EditMethod * pEM;
-@@ -115,6 +192,36 @@ void EV_UnixMouse::mouseClick(AV_View* pView, GdkEventButton* e)
+@@ -115,6 +194,37 @@ void EV_UnixMouse::mouseClick(AV_View* pView, GdkEventButton* e)
  
  	device = gdk_event_get_source_device((GdkEvent *) e);
  
@@ -130,9 +133,10 @@ index 2ca54ec..a9cc958 100644
 +				m_pThresholdTimer = UT_Timer::static_constructor(stopScroll, this);
 +			}
 +
-+			m_pThresholdTimer->set(1000);
++			m_pThresholdTimer->set(RELEASE_SCROLL_TIMEOUT);
 +			return;
-+                }
++                } else
++			m_bTouchOngoing = FALSE;
 +
 +		m_iLastTouchX = (int) e->x;
 +		m_iLastTouchY = (int) e->y;
@@ -141,7 +145,7 @@ index 2ca54ec..a9cc958 100644
  	if (e->button == 1)
  		emb = EV_EMB_BUTTON1;
  	else if (e->button == 2)
-@@ -195,6 +302,31 @@ void EV_UnixMouse::mouseMotion(AV_View* pView, GdkEventMotion *e)
+@@ -195,6 +305,31 @@ void EV_UnixMouse::mouseMotion(AV_View* pView, GdkEventMotion *e)
  
  	device = gdk_event_get_source_device((GdkEvent *) e);
  
