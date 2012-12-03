@@ -5,7 +5,7 @@
 Summary: The AbiWord word processor
 Name: abiword
 Version: %{majorversion}.%{minorversion}.%{microversion}
-Release: 1.git20121011%{?dist}.olpc8
+Release: 1.git20121011%{?dist}.olpc9
 Epoch: 1
 Group: Applications/Editors
 License: GPLv2+
@@ -105,7 +105,7 @@ cd $RPM_BUILD_DIR/abiword-20121011
 # we need to update the generated configuration files because of patch104
 ./autogen-common.sh
 autoreconf --force --install
-%configure --disable-static --enable-dynamic --enable-plugins --enable-clipart --enable-templates --enable-introspection
+%configure --disable-static --enable-dynamic --enable-plugins --enable-clipart --enable-templates --enable-introspection --disable-spell
 make %{?_smp_mflags} V=1
 
 # build the documentation
