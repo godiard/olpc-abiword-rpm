@@ -5,7 +5,7 @@
 Summary: The AbiWord word processor
 Name: abiword
 Version: %{majorversion}.%{minorversion}.%{microversion}
-Release: 1.git20121011%{?dist}.olpc9
+Release: 1.git20121011%{?dist}.olpc
 Epoch: 1
 Group: Applications/Editors
 License: GPLv2+
@@ -38,10 +38,14 @@ Patch4: introspection-fixes.patch
 Patch5: memory-allocator-confusion.patch
 Patch6: abi-introspection.diff
 
+# Avoid crash with maliit - SL#4037 - OLPC #12311
+Patch10: avoid-maliit-crash.patch
+
 # OLPC patch to add touch text handles
 Patch99: abi-selection-handles.diff
 Patch100: abiword-set-both-handles-below-baseline.diff
 Patch101: abiword-touch-scrolling.diff
+Patch102: abiword-change-keyboard-focus-logic.diff
 
 BuildRequires: autoconf, libtool
 BuildRequires: desktop-file-utils
@@ -90,10 +94,12 @@ Includes and definitions for developing with libabiword.
 %patch4 -p1
 %patch5 -p1
 %patch6 -p1
+%patch10 -p1
 
 %patch99 -p1
 %patch100 -p1
 %patch101 -p1
+%patch102 -p1
 
 # setup abiword documentation
 %setup -q -T -b 1 -n abiword-docs-%{version}

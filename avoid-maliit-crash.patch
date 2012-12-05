@@ -1,0 +1,13 @@
+diff -ur abiword-20121011.ori/src/af/xap/gtk/xap_UnixFrameImpl.cpp abiword-20121011/src/af/xap/gtk/xap_UnixFrameImpl.cpp
+--- abiword-20121011.ori/src/af/xap/gtk/xap_UnixFrameImpl.cpp	2012-10-16 14:31:21.010000248 +0000
++++ abiword-20121011/src/af/xap/gtk/xap_UnixFrameImpl.cpp	2012-10-16 14:33:40.270000253 +0000
+@@ -1754,6 +1754,9 @@
+ 
+ 	PT_DocPosition begin_p, end_p, here;
+ 
++	if (!pView)
++		return FALSE;
++
+ 	begin_p = pView->mapDocPosSimple (FV_DOCPOS_BOB);
+ 	end_p = pView->mapDocPosSimple (FV_DOCPOS_EOB);
+ 	here = pView->getInsPoint ();

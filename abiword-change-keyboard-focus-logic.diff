@@ -1,0 +1,111 @@
+diff --git a/src/af/ev/gtk/ev_UnixMouse.cpp b/src/af/ev/gtk/ev_UnixMouse.cpp
+index 8c1d4ed..8e88793 100644
+--- a/src/af/ev/gtk/ev_UnixMouse.cpp
++++ b/src/af/ev/gtk/ev_UnixMouse.cpp
+@@ -40,7 +40,8 @@ EV_UnixMouse::EV_UnixMouse(EV_EditEventMapper * pEEM)
+ 	  m_bLastTouchValid(FALSE),
+ 	  m_bTouchOngoing(FALSE),
+ 	  m_bScrollDragOngoing(FALSE),
+-	  m_pThresholdTimer(NULL)
++	  m_pThresholdTimer(NULL),
++	  m_pEventWidget(NULL)
+ {
+ }
+ 
+@@ -120,6 +121,7 @@ void EV_UnixMouse::mouseUp(AV_View* pView, GdkEventButton* e)
+ 	{
+ 	case EV_EEMR_COMPLETE:
+ 		UT_ASSERT(pEM);
++		gtk_widget_grab_focus (gtk_get_event_widget ((GdkEvent *) e));
+ 		invokeMouseMethod(pView, pEM, static_cast<UT_sint32>(pView->getGraphics()->tluD(e->x)), static_cast<UT_sint32>(pView->getGraphics()->tluD(e->y)));
+ 		signal(emc|mop|emb|ems, static_cast<UT_sint32>(pView->getGraphics()->tluD(e->x)), static_cast<UT_sint32>(pView->getGraphics()->tluD(e->y)));
+ 		return;
+@@ -180,6 +182,9 @@ void EV_UnixMouse::stopScroll (UT_Worker* pWorker)
+ 		UT_ASSERT(0);
+ 		return;
+ 	}
++
++	if (pMouse->m_pEventWidget)
++		gtk_widget_grab_focus (pMouse->m_pEventWidget);
+ }
+ 
+ void EV_UnixMouse::mouseClick(AV_View* pView, GdkEventButton* e)
+@@ -207,6 +212,7 @@ void EV_UnixMouse::mouseClick(AV_View* pView, GdkEventButton* e)
+ 			m_iTouchY = (gint) e->y;
+ 			m_iLastTouchX = (int) e->x;
+ 			m_iLastTouchY = (int) e->y;
++			m_pEventWidget = gtk_get_event_widget ((GdkEvent *) e);
+ 
+ 			if (m_pThresholdTimer)
+ 				m_pThresholdTimer->stop();
+@@ -271,6 +277,7 @@ void EV_UnixMouse::mouseClick(AV_View* pView, GdkEventButton* e)
+ 	{
+ 	case EV_EEMR_COMPLETE:
+ 		UT_ASSERT(pEM);
++		gtk_widget_grab_focus (gtk_get_event_widget ((GdkEvent *) e));
+ 		invokeMouseMethod(pView,pEM,static_cast<UT_sint32>(pView->getGraphics()->tluD(e->x)),static_cast<UT_sint32>(pView->getGraphics()->tluD(e->y)));
+ 		signal(emc|mop|emb|state, static_cast<UT_sint32>(pView->getGraphics()->tluD(e->x)),static_cast<UT_sint32>(pView->getGraphics()->tluD(e->y)));
+ 
+diff --git a/src/af/ev/gtk/ev_UnixMouse.h b/src/af/ev/gtk/ev_UnixMouse.h
+index 1aac31f..7eb21ff 100644
+--- a/src/af/ev/gtk/ev_UnixMouse.h
++++ b/src/af/ev/gtk/ev_UnixMouse.h
+@@ -23,6 +23,7 @@
+ #define EV_UNIXMOUSE_H
+ 
+ #include <gdk/gdk.h>
++#include <gtk/gtk.h>
+ 
+ #include "ut_types.h"
+ #include "ut_timer.h"
+@@ -58,6 +59,7 @@ protected:
+ 	bool m_bScrollDragOngoing;
+ 	AV_View * m_pScrolledView;
+ 	UT_Timer * m_pThresholdTimer;
++	GtkWidget * m_pEventWidget;
+ };
+ 
+ #endif // EV_UNIXMOUSE_H
+diff --git a/src/af/xap/gtk/xap_UnixFrameImpl.cpp b/src/af/xap/gtk/xap_UnixFrameImpl.cpp
+index edde978..c85bd25 100644
+--- a/src/af/xap/gtk/xap_UnixFrameImpl.cpp
++++ b/src/af/xap/gtk/xap_UnixFrameImpl.cpp
+@@ -1530,11 +1530,6 @@ void XAP_UnixFrameImpl::_createTopLevelWindow(void)
+ 	g_signal_connect(G_OBJECT(m_wTopLevelWindow), "size_allocate",
+ 					   G_CALLBACK(_fe::sizeAllocate), NULL);
+ 
+-	g_signal_connect(G_OBJECT(m_wTopLevelWindow), "focus_in_event",
+-					   G_CALLBACK(_fe::focusIn), NULL);
+-	g_signal_connect(G_OBJECT(m_wTopLevelWindow), "focus_out_event",
+-					   G_CALLBACK(_fe::focusOut), NULL);
+-
+ 	DragInfo * dragInfo = s_getDragInfo();
+ 
+ 	gtk_drag_dest_set (m_wTopLevelWindow,
+@@ -1574,11 +1569,6 @@ void XAP_UnixFrameImpl::_createTopLevelWindow(void)
+ 	g_signal_connect(G_OBJECT(m_wTopLevelWindow), "destroy",
+ 					   G_CALLBACK(_fe::destroy), NULL);
+ 
+-	g_signal_connect(G_OBJECT(m_wTopLevelWindow), "focus_in_event",
+-					   G_CALLBACK(_fe::focus_in_event), NULL);
+-	g_signal_connect(G_OBJECT(m_wTopLevelWindow), "focus_out_event",
+-					   G_CALLBACK(_fe::focus_out_event), NULL);
+-
+ 	// create a VBox inside it.
+ 
+ 	m_wVBox = gtk_box_new(GTK_ORIENTATION_VERTICAL,0);
+diff --git a/src/wp/ap/gtk/ap_UnixFrameImpl.cpp b/src/wp/ap/gtk/ap_UnixFrameImpl.cpp
+index b5266ac..4f1def1 100644
+--- a/src/wp/ap/gtk/ap_UnixFrameImpl.cpp
++++ b/src/wp/ap/gtk/ap_UnixFrameImpl.cpp
+@@ -249,10 +249,6 @@ GtkWidget * AP_UnixFrameImpl::_createDocumentWindow()
+ 	g_signal_connect(G_OBJECT(m_dArea), "configure_event",
+ 					   G_CALLBACK(XAP_UnixFrameImpl::_fe::configure_event), NULL);
+ 
+-	// focus and XIM related
+-	g_signal_connect(G_OBJECT(m_dArea), "enter_notify_event", G_CALLBACK(ap_focus_in_event), this);
+-	g_signal_connect(G_OBJECT(m_dArea), "leave_notify_event", G_CALLBACK(ap_focus_out_event), this);
+-
+ 	//
+ 	// Need this to fix screen flicker for abiwidget on focus in/out
+ 	//
