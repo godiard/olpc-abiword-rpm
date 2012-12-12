@@ -5,7 +5,7 @@
 Summary: The AbiWord word processor
 Name: abiword
 Version: %{majorversion}.%{minorversion}.%{microversion}
-Release: 1.git20121011%{?dist}.olpc
+Release: 1.git20121011%{?dist}.olpc11
 Epoch: 1
 Group: Applications/Editors
 License: GPLv2+
@@ -46,6 +46,9 @@ Patch99: abi-selection-handles.diff
 Patch100: abiword-set-both-handles-below-baseline.diff
 Patch101: abiword-touch-scrolling.diff
 Patch102: abiword-change-keyboard-focus-logic.diff
+
+# Avoid crash saving to PDF - SL #4093
+Patch105: fix-pdf-export.diff
 
 BuildRequires: autoconf, libtool
 BuildRequires: desktop-file-utils
@@ -100,6 +103,7 @@ Includes and definitions for developing with libabiword.
 %patch100 -p1
 %patch101 -p1
 %patch102 -p1
+%patch105 -p1
 
 # setup abiword documentation
 %setup -q -T -b 1 -n abiword-docs-%{version}
