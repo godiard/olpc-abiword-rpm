@@ -5,7 +5,7 @@
 Summary: The AbiWord word processor
 Name: abiword
 Version: %{majorversion}.%{minorversion}.%{microversion}
-Release: 1.git20121011%{?dist}.olpc11
+Release: 1.git20121011%{?dist}.olpc12
 Epoch: 1
 Group: Applications/Editors
 License: GPLv2+
@@ -49,6 +49,8 @@ Patch102: abiword-change-keyboard-focus-logic.diff
 
 # Avoid crash saving to PDF - SL #4093
 Patch105: fix-pdf-export.diff
+
+Patch106: add_toggle_ruler.diff
 
 BuildRequires: autoconf, libtool
 BuildRequires: desktop-file-utils
@@ -104,6 +106,8 @@ Includes and definitions for developing with libabiword.
 %patch101 -p1
 %patch102 -p1
 %patch105 -p1
+
+%patch106 -p1
 
 # setup abiword documentation
 %setup -q -T -b 1 -n abiword-docs-%{version}
@@ -180,6 +184,10 @@ update-desktop-database %{_datadir}/applications > /dev/null 2>&1 || :
 # Abiword help
 %{_datadir}/%{name}-%{majorversion}.%{minorversion}/AbiWord
 %{_mandir}/man1/abiword.1.gz
+# collaboration
+#%{_datadir}/dbus-1/services/org.freedesktop.Telepathy.Client.AbiCollab.service
+#%{_datadir}/telepathy/clients/AbiCollab.client
+
 
 %files -n libabiword
 %doc $RPM_BUILD_DIR/%{name}-20121011/COPYING $RPM_BUILD_DIR/%{name}-20121011/COPYRIGHT.TXT

@@ -1,0 +1,31 @@
+diff -uNr abiword-20121011/src/wp/ap/gtk/abiwidget.cpp abiword-20121011.new/src/wp/ap/gtk/abiwidget.cpp
+--- abiword-20121011/src/wp/ap/gtk/abiwidget.cpp	2013-08-07 13:07:56.071825233 -0300
++++ abiword-20121011.new/src/wp/ap/gtk/abiwidget.cpp	2013-08-07 13:09:19.149423736 -0300
+@@ -1550,6 +1550,14 @@
+ 	return res;
+ }
+ 
++extern "C" void
++abi_widget_toggle_rulers(AbiWidget * abi, gboolean visible)
++{
++	AP_UnixFrame * pFrame = (AP_UnixFrame *) abi->priv->m_pFrame;
++	if(pFrame != NULL)
++	    pFrame->toggleRuler(visible);
++}
++
+ extern "C" gboolean
+ abi_widget_insert_table(AbiWidget * abi, gint32 rows, gint32 cols)
+ {
+diff -uNr abiword-20121011/src/wp/ap/gtk/abiwidget.h abiword-20121011.new/src/wp/ap/gtk/abiwidget.h
+--- abiword-20121011/src/wp/ap/gtk/abiwidget.h	2012-05-25 12:46:20.000000000 -0300
++++ abiword-20121011.new/src/wp/ap/gtk/abiwidget.h	2013-08-07 13:11:52.132842939 -0300
+@@ -428,6 +428,9 @@
+   gboolean abi_widget_edit_header (AbiWidget * w);
+   gboolean abi_widget_edit_footer (AbiWidget * w);
+ 
++  /* rulers methods */
++  void abi_widget_toggle_rulers(AbiWidget * abi, gboolean visible);
++
+   /* table functions */
+   gboolean abi_widget_insert_table(AbiWidget * w, gint32 rows, gint32 cols);
+   gboolean abi_widget_get_mouse_pos(AbiWidget * w, gint32 * x, gint32 * y);
