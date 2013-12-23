@@ -1,0 +1,54 @@
+diff --git a/src/text/fmt/gtk/fv_UnixSelectionHandles.cpp b/src/text/fmt/gtk/fv_UnixSelectionHandles.cpp
+index 935e8fa..3032aed 100644
+--- a/src/text/fmt/gtk/fv_UnixSelectionHandles.cpp
++++ b/src/text/fmt/gtk/fv_UnixSelectionHandles.cpp
+@@ -50,6 +50,12 @@ FV_UnixSelectionHandles::FV_UnixSelectionHandles(FV_View *view, FV_Selection sel
+ 	: FV_SelectionHandles (view, selection)
+ {
+ 	XAP_Frame * pFrame = static_cast<XAP_Frame*>(m_pView->getParentData());
++
++	if (!pFrame) {
++		m_text_handle = NULL;
++		return;
++	}
++
+ 	XAP_UnixFrameImpl * pFrameImpl =static_cast<XAP_UnixFrameImpl *>( pFrame->getFrameImpl());
+ 	GtkWidget * pWidget = pFrameImpl->getViewWidget();
+ 
+@@ -62,11 +68,15 @@ FV_UnixSelectionHandles::FV_UnixSelectionHandles(FV_View *view, FV_Selection sel
+ 
+ FV_UnixSelectionHandles::~FV_UnixSelectionHandles()
+ {
+-	g_object_unref (m_text_handle);
++	if (m_text_handle)
++		g_object_unref (m_text_handle);
+ }
+ 
+ void FV_UnixSelectionHandles::hide()
+ {
++	if (!m_text_handle)
++		return;
++
+ 	_fv_text_handle_set_mode (m_text_handle, FV_TEXT_HANDLE_MODE_NONE);
+ }
+ 
+@@ -74,6 +84,9 @@ void FV_UnixSelectionHandles::setCursorCoords(UT_sint32 x, UT_sint32 y, UT_uint3
+ {
+ 	GdkRectangle rect;
+ 
++	if (!m_text_handle)
++		return;
++
+ 	_fv_text_handle_set_mode(m_text_handle, FV_TEXT_HANDLE_MODE_CURSOR);
+ 	_fv_text_handle_set_visible (m_text_handle, FV_TEXT_HANDLE_POSITION_CURSOR, visible);
+ 
+@@ -94,6 +107,9 @@ void FV_UnixSelectionHandles::setSelectionCoords(UT_sint32 start_x, UT_sint32 st
+ {
+ 	GdkRectangle rect;
+ 
++	if (!m_text_handle)
++		return;
++
+ 	_fv_text_handle_set_mode(m_text_handle, FV_TEXT_HANDLE_MODE_SELECTION);
+ 
+ 	_fv_text_handle_set_visible (m_text_handle, FV_TEXT_HANDLE_POSITION_SELECTION_START, start_visible);
